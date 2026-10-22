@@ -1,0 +1,15 @@
+[Unit]
+Description=Agile Forecast data refresh, retrain and new forecast run
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agile
+Group=agile
+WorkingDirectory=/opt/agile-forecast
+EnvironmentFile=/etc/agile-forecast.env
+ExecStart=/opt/agile-forecast/.venv/bin/python -m app.pipeline
+TimeoutStartSec=15min
+Nice=10
+NoNewPrivileges=true

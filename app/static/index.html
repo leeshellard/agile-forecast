@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agile Forecast</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M18 2 6 18h8l-2 12 12-16h-8z' fill='%23e6457a'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">⚡ Agile Forecast</div>
+    <label class="region">
+      <span>Region</span>
+      <select id="region"></select>
+    </label>
+    <div id="status" class="status">Loading…</div>
+  </header>
+
+  <main>
+    <section class="charts">
+      <div class="day-nav">
+        <div class="seg" role="group" aria-label="View">
+          <button type="button" data-mode="day" class="on">Day</button>
+          <button type="button" data-mode="week">Week</button>
+        </div>
+        <button id="prev-day" type="button" aria-label="Previous">◀</button>
+        <input id="view-date" type="date" aria-label="View day">
+        <button id="next-day" type="button" aria-label="Next">▶</button>
+        <button id="today" type="button" class="link" hidden>Back to today</button>
+      </div>
+      <h1 id="title">National Average</h1>
+      <p id="subtitle" class="subtitle"></p>
+      <div id="week-table" class="table-wrap week-table" hidden>
+        <table>
+          <thead><tr><th>Day</th><th>Average</th><th>Cheapest</th><th id="under-head">Slots under 12p</th><th>Forecast error</th></tr></thead>
+          <tbody id="week-rows"></tbody>
+        </table>
+      </div>
+      <div id="price-chart" class="chart"></div>
+      <div id="gen-wrap">
+        <h2>Generation and demand</h2>
+        <div id="gen-chart" class="chart chart-short"></div>
+      </div>
+    </section>
+
+    <aside class="options">
+      <h2>Options</h2>
+      <label class="field">
+        <span>Days to plot</span>
+        <select id="days"></select>
+      </label>
+      <label class="field">
+        <span>Days of history</span>
+        <select id="history"><option>0</option><option>1</option><option selected>2</option><option>3</option><option>7</option></select>
+      </label>
+      <label class="field">
+        <span>Earlier forecasts to overlay</span>
+        <select id="previous"><option>0</option><option>1</option><option>2</option><option>3</option><option>5</option><option>7</option></select>
+        <small>One per day back. Shows how the forecast has shifted as new data arrived.</small>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="show-range" checked>
+        <span>Show 10–90% range<small>Model uncertainty on the latest forecast (not weather uncertainty).</small></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="show-bands" checked>
+        <span>Colour cheap and negative prices<small>Green below the threshold, blue when you're paid to use electricity.</small></span>
+      </label>
+      <label class="field threshold">
+        <span>Cheap price threshold</span>
+        <span class="unit"><input type="number" id="cheap-threshold" value="12" step="0.5"> p/kWh</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="show-gen" checked>
+        <span>Show generation and demand<small>Forecast inputs used by the latest run, plus recent actuals.</small></span>
+      </label>
+    </aside>
+  </main>
+
+  <section class="accuracy">
+    <div class="acc-head">
+      <h2>Forecast accuracy</h2>
+      <label class="inline">Last
+        <select id="acc-days"><option>7</option><option>14</option><option selected>30</option><option>90</option></select>
+        days of forecasts
+      </label>
+    </div>
+    <div class="acc-grid">
+      <div>
+        <div id="acc-summary" class="acc-summary"></div>
+        <div id="acc-chart" class="chart chart-short"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Forecast run</th><th>Periods scored</th><th>MAE (p/kWh)</th></tr></thead>
+          <tbody id="acc-runs"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Prices: Octopus Energy API. Demand, embedded and metered wind forecasts: NESO Data Portal.
+    Wind outturn: Elexon BMRS. Forecasts are estimates for personal use only — no warranty of accuracy.
+    · <a href="/docs">API docs</a>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

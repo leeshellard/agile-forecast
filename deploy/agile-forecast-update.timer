@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Agile Forecast update several times a day
+
+[Timer]
+# Octopus publishes the next day's Agile prices at about 16:00 UK time; NESO forecasts refresh through the day.
+OnCalendar=*-*-* 04,10,16,22:20:00 Europe/London
+OnCalendar=*-*-* 16:50:00 Europe/London
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
