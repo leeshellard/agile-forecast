@@ -105,7 +105,6 @@ a { color: var(--accent); }
 
 @media (max-width: 860px) {
   main { grid-template-columns: 1fr; }
-  .options { order: -1; }
   .acc-grid { grid-template-columns: 1fr; }
   .chart { height: 340px; }
   .status { margin-left: 0; text-align: left; width: 100%; }
