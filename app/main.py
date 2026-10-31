@@ -62,7 +62,15 @@ def _run_prices(run_ids: list[int], region: str) -> pd.DataFrame:
     pts = db.read_df(f"SELECT * FROM run_points WHERE run_id IN ({marks}) ORDER BY run_id, ts", run_ids)
     coeffs = db.read_df(f"SELECT run_id, a, b, c FROM run_regions WHERE region = ? AND run_id IN ({marks})",
                         [region, *run_ids]).set_index("run_id")
+    made = db.read_df(f"SELECT id, created_at FROM runs WHERE id IN ({marks})", run_ids).set_index("id")["created_at"]
+    bands = db.read_df(f"SELECT * FROM run_bands WHERE run_id IN ({marks})", run_ids)
     pts["ts"] = pd.to_datetime(pts["ts"], utc=True)
+    pts["horizon"] = model.horizon_days(pts["ts"], pd.to_datetime(pts["run_id"].map(made), utc=True))
+    # Calibrate the stored model range (runs made before calibration existed are left as they were).
+    b = pts[["run_id", "horizon"]].merge(bands, on=["run_id", "horizon"], how="left")
+    b = b.fillna({"scale": 1.0, "low_offset": 0.0, "high_offset": 0.0})
+    pts["p10"], pts["p90"] = model.widen(pts["p10"].to_numpy(), pts["p50"].to_numpy(), pts["p90"].to_numpy(),
+                                         b["scale"].to_numpy(), b["low_offset"].to_numpy(), b["high_offset"].to_numpy())
     peak = model.is_peak(pd.DatetimeIndex(pts["ts"]))
     for col in ["p10", "p50", "p90"]:
         out = np.empty(len(pts))
@@ -300,7 +308,6 @@ def accuracy(region: str, days: int = Query(30, ge=1, le=180)):
         return empty
     df["err"] = (df["p50"] - df["price"]).abs()
     df["inside"] = (df["price"] >= df["p10"]) & (df["price"] <= df["p90"])
-    df["horizon"] = np.ceil((df["ts"] - df["created_at"]).dt.total_seconds() / 86400).clip(lower=1).astype(int)
 
     by_h = df.groupby("horizon").agg(mae=("err", "mean"), coverage=("inside", "mean"), n=("err", "size")).reset_index()
     by_run = (df.groupby(["run_id", "created_at"])

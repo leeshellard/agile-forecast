@@ -19,6 +19,10 @@ QUANTILES = {"p10": 0.1, "p50": 0.5, "p90": 0.9}
 LEVEL_WINDOW_DAYS = 14
 LEVEL_LAG_DAYS = 2
 RECENCY_HALF_LIFE_DAYS = 90
+BAND_TARGET = 0.8      # share of actual prices the 10-90% range should contain
+BAND_MIN_SCORED = 96   # two days of half-hours before a day-ahead gets its own widening factor
+BAND_MAX_SCALE = 6.0
+BAND_MIN_HALF = 0.5    # p/kWh; stops a near-zero model width producing a huge ratio
 
 
 def is_peak(index: pd.DatetimeIndex) -> np.ndarray:
@@ -101,6 +105,57 @@ def train_and_predict(history: pd.DataFrame, national: pd.Series, future: pd.Dat
     fut["price_level"] = recent.mean()
     preds = _predict(models, make_features(fut))
     return preds, len(train), holdout_mae
+
+
+def horizon_days(ts, made) -> np.ndarray:
+    """Whole days ahead of the forecast run (1 = within 24 hours), as used for scoring and calibration."""
+    days = (pd.Series(ts).values - pd.Series(made).values) / np.timedelta64(1, "D")
+    return np.clip(np.ceil(days), 1, config.MAX_HORIZON_DAYS).astype(int)
+
+
+def band_calibration(scored: pd.DataFrame) -> dict[int, tuple[float, float, float]]:
+    """
+    scored: past national forecast points with created_at, ts, p10, p50, p90 and the published price.
+    Returns {days_ahead: (scale, low_offset, high_offset)}.
+
+    The quantile models are over-confident, so their 10-90% range holds far fewer than 80% of actual prices.
+    Two corrections are worked out for each day ahead, and `widen` uses whichever gives the wider range:
+      - scale: how far the half-widths (p50-p10 below, p90-p50 above) must be stretched for 80% of recent
+        actuals to have landed inside. This keeps the model's sense of which half-hours are less certain.
+      - offsets: the 10th and 90th percentiles of recent misses (actual - p50), so the range is never narrower
+        than recent errors, even where the model's own range is close to zero.
+    A later day is never more certain than an earlier one; days with too little data use all days pooled.
+    """
+    if scored.empty:
+        return {}
+    p10, p50, p90, price = (scored[c].to_numpy(float) for c in ("p10", "p50", "p90", "price"))
+    miss = price - p50
+    half = np.where(miss >= 0, p90 - p50, p50 - p10)
+    ratio = np.abs(miss) / np.maximum(half, BAND_MIN_HALF)
+    horizon = horizon_days(scored["ts"], scored["created_at"])
+    lo_q, hi_q = (1 - BAND_TARGET) / 2, (1 + BAND_TARGET) / 2
+
+    def stats(mask):
+        r, m = (ratio, miss) if mask.sum() < BAND_MIN_SCORED else (ratio[mask], miss[mask])
+        if len(r) < BAND_MIN_SCORED:
+            return 1.0, 0.0, 0.0
+        return float(np.quantile(r, BAND_TARGET)), float(np.quantile(m, lo_q)), float(np.quantile(m, hi_q))
+
+    days = range(1, config.MAX_HORIZON_DAYS + 1)
+    raw = np.array([stats(horizon == h) for h in days])
+    scale = np.clip(np.maximum.accumulate(raw[:, 0]), 1.0, BAND_MAX_SCALE)
+    low = np.minimum.accumulate(raw[:, 1])
+    high = np.maximum.accumulate(raw[:, 2])
+    return {h: (round(float(s), 3), round(float(lo), 2), round(float(hi), 2))
+            for h, s, lo, hi in zip(days, scale, low, high)}
+
+
+def widen(p10, p50, p90, scale=1.0, low_offset=0.0, high_offset=0.0):
+    """Calibrated range: the wider of the stretched model range and p50 + recent-miss offsets.
+    The defaults leave the model range unchanged."""
+    lo = np.minimum(p50 - scale * (p50 - p10), p50 + low_offset)
+    hi = np.maximum(p50 + scale * (p90 - p50), p50 + high_offset)
+    return lo, hi
 
 
 def fit_region_coeffs(prices_wide: pd.DataFrame, days: int = 60) -> dict[str, tuple[float, float, float]]:

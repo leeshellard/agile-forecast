@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS run_regions (
     a REAL, b REAL, c REAL,
     PRIMARY KEY (run_id, region)
 );
+CREATE TABLE IF NOT EXISTS run_bands (
+    run_id      INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    horizon     INTEGER NOT NULL,
+    scale       REAL NOT NULL,
+    low_offset  REAL NOT NULL,
+    high_offset REAL NOT NULL,
+    PRIMARY KEY (run_id, horizon)
+);
 CREATE INDEX IF NOT EXISTS idx_prices_ts ON prices(ts);
 """
 
@@ -113,8 +121,24 @@ def latest_price_ts() -> pd.Timestamp | None:
     return None if v is None else pd.Timestamp(v)
 
 
+def scored_points(since: pd.Timestamp) -> pd.DataFrame:
+    """National forecast points from runs since `since` that now have a published price (for range calibration)."""
+    df = read_df(
+        """SELECT r.created_at, p.ts, p.p10, p.p50, p.p90, a.price
+           FROM run_points p
+           JOIN runs r ON r.id = p.run_id
+           JOIN prices a ON a.region = 'X' AND a.ts = p.ts
+           WHERE r.created_at >= ? AND p.p50 IS NOT NULL""",
+        (since.strftime("%Y-%m-%dT%H:%M:%SZ"),),
+    )
+    for c in ("created_at", "ts"):
+        df[c] = pd.to_datetime(df[c], utc=True)
+    return df
+
+
 def save_run(created_at: pd.Timestamp, train_rows: int, holdout_mae: float,
-             points: pd.DataFrame, coeffs: dict[str, tuple[float, float, float]]) -> int:
+             points: pd.DataFrame, coeffs: dict[str, tuple[float, float, float]],
+             bands: dict[int, tuple[float, float, float]] | None = None) -> int:
     with connect() as con:
         cur = con.execute(
             "INSERT INTO runs (created_at, train_rows, holdout_mae) VALUES (?, ?, ?)",
@@ -132,6 +156,10 @@ def save_run(created_at: pd.Timestamp, train_rows: int, holdout_mae: float,
         con.executemany(
             "INSERT INTO run_regions VALUES (?, ?, ?, ?, ?)",
             [(run_id, r, *abc) for r, abc in coeffs.items()],
+        )
+        con.executemany(
+            "INSERT INTO run_bands VALUES (?, ?, ?, ?, ?)",
+            [(run_id, int(h), *map(float, b)) for h, b in (bands or {}).items()],
         )
     return run_id
 
