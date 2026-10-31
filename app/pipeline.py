@@ -61,12 +61,17 @@ def update():
 
     preds, train_rows, holdout_mae = model.train_and_predict(hist, national, to_predict)
     coeffs = model.fit_region_coeffs(wide)
+    # Calibrate the 10-90% range on how recent forecasts actually fared (applied when the run is served).
+    bands = model.band_calibration(db.scored_points(now - pd.Timedelta(days=config.CALIBRATION_DAYS)))
     # Inputs are kept from 'now' for the generation chart; prices are only predicted where none are published.
     points = future.join(preds)
-    run_id = db.save_run(now, train_rows, holdout_mae, points, coeffs)
+    run_id = db.save_run(now, train_rows, holdout_mae, points, coeffs, bands)
     db.prune_runs(now - pd.Timedelta(days=config.KEEP_RUNS_DAYS))
     log.info("Run %d: %d forecast periods (%s to %s), trained on %d rows, holdout MAE %.2f p/kWh",
              run_id, len(points), points.index.min(), points.index.max(), train_rows, holdout_mae)
+    if bands:
+        log.info("Range calibration by day ahead (scale, low, high): %s",
+                 ", ".join(f"{h}:({s:.2f}, {lo:+.1f}, {hi:+.1f})" for h, (s, lo, hi) in bands.items()))
     return run_id
 
 

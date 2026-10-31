@@ -2,7 +2,7 @@
 
 A self-hosted forecaster for Octopus **Agile** electricity prices, up to 14 days ahead, for all 14 regions. It was inspired by [AgilePredict](https://agilepredict.com).
 
-- Web UI with forecast vs actual prices, a 10–90% range, earlier-forecast overlays and generation/demand inputs
+- Web UI with forecast vs actual prices, a calibrated 10–90% range, earlier-forecast overlays and generation/demand inputs
 - JSON API (easy to use from Home Assistant)
 - Stores every forecast run and scores it against the published prices, so you can see how accurate it is by days ahead
 
@@ -20,7 +20,12 @@ A self-hosted forecaster for Octopus **Agile** electricity prices, up to 14 days
    - Features: demand, metered wind, embedded wind and solar, residual demand, renewable share, time of day, day of week, peak flag.
    - A trailing 14-day price level stands in for gas and carbon costs, which the fundamentals can't see.
 3. **Regional prices:** Agile is linear in the wholesale price, plus a 16:00–19:00 peak adder. So each region is fitted as `a × national + b × peak + c` over the last 60 days. No tariff constants are hard-coded.
-4. **Schedule:** the update job runs 5 times a day, including just after Octopus publishes tomorrow's prices (around 16:00). Each run re-fetches the data, retrains, and saves a new forecast run.
+4. **Range calibration:** the quantile models are over-confident. On their own, only about 20–40% of actual prices land inside their 10–90% range, and almost none 9 or more days ahead. So each run also checks the last 28 days of scored forecasts and works out two corrections for each day ahead:
+   - how far the model's range has to be stretched around the central forecast for 80% of actual prices to have landed inside; and
+   - the 10th and 90th percentiles of recent misses, so the range is never narrower than recent errors.
+
+   The wider of the two is shown. In a backtest on October 2026 data, this raised coverage from 18% to about 73% (about 75% for 1–3 days ahead), and it should get closer to 80% as more history builds up. The stored model output is left as it is and the calibration is applied when the forecast is served. The range is never narrowed, and a later day is never shown as more certain than an earlier one.
+5. **Schedule:** the update job runs 5 times a day, including just after Octopus publishes tomorrow's prices (around 16:00). Each run re-fetches the data, retrains, and saves a new forecast run.
 
 The "holdout error" in the header is the mean absolute error on the most recent 14 days. Those days are held out of training, then the model is refit on everything. Treat it as a guide; forecasts more than a few days out depend heavily on the weather forecasts.
 
@@ -149,12 +154,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `AGILE_HISTORY_DAYS` | `365` | Training history to backfill and use |
 | `AGILE_REFRESH_DAYS` | `10` | Days re-fetched on each update |
 | `AGILE_KEEP_RUNS_DAYS` | `180` | How long stored forecast runs are kept |
+| `AGILE_CALIBRATION_DAYS` | `28` | Days of scored past forecasts used to calibrate the 10–90% range |
 
 ## Notes and limitations
 
 - **Upstream sources can change.** The NESO resource IDs are in `app/sources.py`; if NESO restructures a dataset, update the ID there.
 - **Gas prices are only captured through the recent price level.** A sharp move in the gas market takes a few days to show up.
-- **The training inputs are *actual* generation and demand, but the forecast uses *forecast* inputs.** That makes the holdout error optimistic. The accuracy panel scores real forecasts, so trust it once a week or two of runs have built up.
+- **The training inputs are *actual* generation and demand, but the forecast uses *forecast* inputs.** That makes the holdout error optimistic. The accuracy panel scores real forecasts, so trust it once a week or two of runs have built up. Its range-coverage line uses the range as it was served, so runs made before calibration existed still show the narrow model range.
 - **Terms of use.** Data is used under the providers' terms: Octopus API; NESO Open Data Licence; Elexon BMRS (© Elexon Limited). This is for personal, non-commercial use, and comes with no warranty of accuracy.
 
 ## Licence

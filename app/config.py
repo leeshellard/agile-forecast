@@ -15,6 +15,10 @@ REFRESH_DAYS = int(os.environ.get("AGILE_REFRESH_DAYS", "10"))
 # Forecasts older than this are pruned from the history tables.
 KEEP_RUNS_DAYS = int(os.environ.get("AGILE_KEEP_RUNS_DAYS", "180"))
 
+# The model's 10-90% range is widened so ~80% of actual prices land inside it, judged on this many days
+# of past forecasts.
+CALIBRATION_DAYS = int(os.environ.get("AGILE_CALIBRATION_DAYS", "28"))
+
 MAX_HORIZON_DAYS = 14
 PRICE_CAP = 100.0  # Agile import cap, p/kWh inc VAT
 TZ = "Europe/London"
