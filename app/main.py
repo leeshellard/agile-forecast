@@ -4,12 +4,14 @@ Run with:  uvicorn app.main:app --host 0.0.0.0 --port 8000
 """
 from __future__ import annotations
 
+from email.utils import format_datetime
 from typing import Optional
+from xml.sax.saxutils import escape
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db, model
@@ -153,6 +155,65 @@ def actual(region: str, days: int = Query(7, ge=1, le=365)):
     region = _region(region)
     df = _actual(region, pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days))
     return [{"date_time": _iso(t), "price": p} for t, p in zip(df["ts"], df["price"])]
+
+
+def _cheapest_block(day: pd.DataFrame, slots: int) -> tuple[pd.Timestamp, float] | None:
+    """Start time and mean price of the cheapest run of `slots` consecutive half-hours."""
+    if len(day) < slots:
+        return None
+    means = day["price"].rolling(slots).mean().shift(-(slots - 1))
+    i = means.idxmin()
+    return day.loc[i, "local"], float(means[i])
+
+
+def _day_item(region: str, date: pd.Timestamp, day: pd.DataFrame, link: str) -> str:
+    """One RSS item: a day's published prices, with a summary and a half-hourly table."""
+    hm = lambda t: t.strftime("%H:%M")
+    lo, hi = day.loc[day["price"].idxmin()], day.loc[day["price"].idxmax()]
+    title = (f"{config.REGIONS[region]} Agile prices for {date:%a %-d %b}: "
+             f"{lo['price']:.2f}p to {hi['price']:.2f}p, average {day['price'].mean():.2f}p")
+    lines = [f"<p><b>Average:</b> {day['price'].mean():.2f}p/kWh<br>",
+             f"<b>Cheapest half-hour:</b> {lo['price']:.2f}p at {hm(lo['local'])}<br>",
+             f"<b>Most expensive half-hour:</b> {hi['price']:.2f}p at {hm(hi['local'])}<br>"]
+    for slots, label in ((2, "1 hour"), (6, "3 hours")):
+        block = _cheapest_block(day, slots)
+        if block:
+            lines.append(f"<b>Cheapest {label}:</b> from {hm(block[0])}, average {block[1]:.2f}p<br>")
+    plunge = day[day["price"] <= 0]
+    if not plunge.empty:
+        lines.append(f"<b>Plunge pricing:</b> {len(plunge)} half-hours at or below 0p<br>")
+    lines.append("</p><table><tr><th>Time</th><th>p/kWh</th></tr>")
+    lines += [f"<tr><td>{hm(t)}</td><td>{p:.2f}</td></tr>" for t, p in zip(day["local"], day["price"])]
+    lines.append("</table>")
+    # Octopus publishes the next day's prices at about 16:00 UK time the day before.
+    published = (date - pd.Timedelta(days=1)).replace(hour=16)
+    return (f"<item><title>{escape(title)}</title><link>{escape(link)}</link>"
+            f"<guid isPermaLink=\"false\">agile-{region}-{date:%Y-%m-%d}</guid>"
+            f"<pubDate>{format_datetime(published.to_pydatetime())}</pubDate>"
+            f"<description>{escape(''.join(lines))}</description></item>")
+
+
+@app.get("/api/{region}/rss")
+def rss(region: str, request: Request, days: int = Query(14, ge=1, le=60)):
+    """RSS feed with one item per day of published prices; a new item appears when the next day's prices land."""
+    region = _region(region)
+    now_local = pd.Timestamp.now(tz=config.TZ)
+    act = _actual(region, (now_local.normalize() - pd.Timedelta(days=days)).tz_convert("UTC"))
+    act["local"] = act["ts"].dt.tz_convert(config.TZ)
+    act["date"] = act["local"].dt.normalize()
+    link = str(request.base_url)
+    items = []
+    for date, day in sorted(act.groupby("date"), reverse=True):
+        # Only whole days (46-50 half-hours allows for the clock changes); today's partial history is skipped.
+        n_expected = int(((date + pd.DateOffset(days=1)) - date) / pd.Timedelta(minutes=30))
+        if len(day) == n_expected:
+            items.append(_day_item(region, date, day.reset_index(drop=True), link))
+    name = escape(f"Agile prices - {config.REGIONS[region]} ({region})")
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
+           f"<title>{name}</title><link>{escape(link)}</link>"
+           f"<description>Published Octopus Agile prices, one post per day</description>"
+           f"<ttl>30</ttl>{''.join(items)}</channel></rss>")
+    return Response(xml, media_type="application/rss+xml")
 
 
 @app.get("/api/{region}/chart")
