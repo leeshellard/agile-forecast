@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My usage · Agile Forecast</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M18 2 6 18h8l-2 12 12-16h-8z' fill='%23e6457a'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">⚡ Agile Forecast</div>
+    <a class="navlink" href="/">Forecast</a>
+    <a class="navlink on" href="/usage">My usage</a>
+    <div id="status" class="status">Loading…</div>
+  </header>
+
+  <div id="setup" class="usage" hidden>
+    <section class="panel setup">
+      <h2>Switch on My usage</h2>
+      <p>This page costs your own smart-meter readings against your tariffs. It is off until the server has your Octopus details.
+         Your API key stays on the server and is never sent to the browser.</p>
+      <p>Add these to <code>/etc/agile-forecast.env</code> (your API key is under Personal details → API access in your Octopus dashboard):</p>
+      <pre>OCTOPUS_API_KEY=sk_live_...
+OCTOPUS_ACCOUNT=A-1234ABCD</pre>
+      <p>Then run <code>systemctl restart agile-forecast &amp;&amp; systemctl start agile-forecast-update.service</code> and reload this page.</p>
+    </section>
+  </div>
+
+  <div id="empty" class="usage" hidden>
+    <section class="panel"><p id="empty-msg" class="empty"></p></section>
+  </div>
+
+  <div id="content" class="usage" hidden>
+    <div class="usage-bar">
+      <div>
+        <h1 style="text-align:left;margin:0">My usage</h1>
+        <p id="subtitle" class="subtitle" style="text-align:left;margin:0"></p>
+      </div>
+      <label class="inline">Period
+        <select id="period">
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365" selected>Last 12 months</option>
+          <option value="0">All data</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="cards" id="cards"></div>
+
+    <section class="panel">
+      <h2>Monthly cost</h2>
+      <p class="hint" id="monthly-hint"></p>
+      <div id="monthly-chart" class="chart"></div>
+    </section>
+
+    <div class="grid2">
+      <section class="panel">
+        <h2>Time of day</h2>
+        <p class="hint">Average demand by hour, and the price you actually paid against the average Agile price for that hour.</p>
+        <div id="hourly-chart" class="chart chart-short"></div>
+      </section>
+      <section class="panel">
+        <h2>Daily usage</h2>
+        <p class="hint">The last 120 days in the period: energy used, and average unit price paid.</p>
+        <div id="daily-chart" class="chart chart-short"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>Months</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Month</th><th>Used (kWh)</th><th>Avg unit (p)</th><th>Cost incl. standing (£)</th>
+            <th id="cmp-head">Comparison (£)</th><th>Exported (kWh)</th><th>Export income (£)</th></tr></thead>
+          <tbody id="month-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    Readings: your Octopus account via the Octopus API. Costs use the tariff you were on at the time, VAT included, at the
+    lowest published (direct debit) rate, so they can differ slightly from your bills. Time-of-use export tariffs are not costed.
+  </footer>
+
+  <script src="/static/usage.js"></script>
+</body>
+</html>

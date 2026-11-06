@@ -55,6 +55,24 @@ CREATE TABLE IF NOT EXISTS run_bands (
     PRIMARY KEY (run_id, horizon)
 );
 CREATE INDEX IF NOT EXISTS idx_prices_ts ON prices(ts);
+-- "My usage": your own meter readings and the tariff rates used to cost them (see app/usage.py).
+CREATE TABLE IF NOT EXISTS usage (
+    kind TEXT NOT NULL,          -- 'import' | 'export'
+    ts   TEXT NOT NULL,          -- start of the half-hour, UTC
+    kwh  REAL NOT NULL,
+    PRIMARY KEY (kind, ts)
+);
+CREATE TABLE IF NOT EXISTS tariff_rates (
+    tariff     TEXT NOT NULL,
+    kind       TEXT NOT NULL,    -- 'unit' | 'standing'
+    valid_from TEXT NOT NULL,
+    p          REAL NOT NULL,    -- pence inc VAT (per kWh, or per day)
+    PRIMARY KEY (tariff, kind, valid_from)
+);
+CREATE TABLE IF NOT EXISTS usage_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 

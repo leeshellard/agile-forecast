@@ -9,7 +9,7 @@ import sys
 
 import pandas as pd
 
-from . import config, db, model, sources
+from . import config, db, model, sources, usage
 
 log = logging.getLogger("agile.pipeline")
 
@@ -72,6 +72,11 @@ def update():
     if bands:
         log.info("Range calibration by day ahead (scale, low, high): %s",
                  ", ".join(f"{h}:({s:.2f}, {lo:+.1f}, {hi:+.1f})" for h, (s, lo, hi) in bands.items()))
+    try:  # optional "My usage" data; a failure here must not lose the forecast run above
+        if usage.sync():
+            log.info("Usage data updated")
+    except Exception:
+        log.exception("Usage sync failed (forecast run was saved)")
     return run_id
 
 
