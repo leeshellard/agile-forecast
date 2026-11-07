@@ -22,6 +22,14 @@ from . import config, db
 log = logging.getLogger("agile.usage")
 API = "https://api.octopus.energy/v1"
 PEAK_HOURS = (16, 17, 18)  # local hours of the Agile evening peak
+# Tariffs to price your usage on at today's rates. A trailing "-" means "newest available product with this prefix"
+# (the fixed deals get a new dated product code each time they are re-issued).
+COMPARE_TARIFFS = [
+    ("Cosy Octopus", "COSY-22-12-08"),
+    ("Cosy 12-month fixed", "COSY-FIX-12M-"),
+    ("Octopus Go", "GO-VAR-22-10-14"),
+    ("Go 12-month fixed", "GO-FIX-12M-"),
+]
 
 
 def configured() -> bool:
@@ -129,6 +137,57 @@ def _sync_rates(tariff: str, kind: str, now: pd.Timestamp) -> None:
                         [(tariff, kind, t, float(p)) for t, p in zip(df["valid_from"], df["value_inc_vat"])])
 
 
+def _resolve_product(spec: str) -> str | None:
+    if not spec.endswith("-"):
+        return spec
+    r = _get(f"{API}/products/", {"page_size": 100, "is_business": "false"})
+    r.raise_for_status()
+    found = [p for p in r.json()["results"] if p["code"].startswith(spec) and p["direction"] == "IMPORT"
+             and p["available_to"] is None]
+    return max(found, key=lambda p: p["available_from"])["code"] if found else None
+
+
+def _current_rates(product: str, region: str) -> dict | None:
+    """Today's price for each half-hour of the day (local time) and the standing charge, for one tariff."""
+    tariff = f"E-1R-{product}-{region}"
+    now = pd.Timestamp.now(tz=config.TZ)
+    day = now.normalize() - pd.Timedelta(days=1)
+    window = {"page_size": 1500, "period_from": _iso(day - pd.Timedelta(days=1)), "period_to": _iso(now + pd.Timedelta(days=2))}
+    units = _pages(f"{API}/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/", window)
+    standing = _pages(f"{API}/products/{product}/electricity-tariffs/{tariff}/standing-charges/", window)
+    if not units or not standing:
+        return None
+    u = pd.DataFrame(units)
+    u["vf"] = pd.to_datetime(u["valid_from"], utc=True)
+    u["vt"] = pd.to_datetime(u["valid_to"], utc=True)
+    slots = []
+    for i in range(48):
+        t = pd.Timestamp(f"{day:%Y-%m-%d} {i // 2:02d}:{30 * (i % 2):02d}").tz_localize(
+            config.TZ, ambiguous=True, nonexistent="shift_forward").tz_convert("UTC")
+        hit = u[(u["vf"] <= t) & (u["vt"].isna() | (u["vt"] > t))]
+        if hit.empty:
+            return None
+        slots.append(float(hit["value_inc_vat"].min()))  # lowest = direct debit
+    sc = pd.DataFrame(standing)
+    sc["vf"] = pd.to_datetime(sc["valid_from"], utc=True)
+    sc = sc[sc["vf"] == sc["vf"].max()]
+    return {"tariff": tariff, "slots": slots, "standing": float(sc["value_inc_vat"].min())}
+
+
+def _sync_comparison(region: str) -> None:
+    out = {}
+    for label, spec in COMPARE_TARIFFS + [("Flexible Octopus", config.USAGE_COMPARE_PRODUCT)]:
+        try:
+            product = _resolve_product(spec)
+            cur = _current_rates(product, region) if product else None
+        except requests.RequestException as e:  # one tariff being unavailable must not stop the rest
+            log.warning("Could not fetch %s: %s", label, e)
+            continue
+        if cur:
+            out[label] = cur
+    _meta_set("compare_current", out)
+
+
 def sync() -> bool:
     """Pull new readings and rates. Returns False when the feature is not configured."""
     if not configured():
@@ -150,6 +209,7 @@ def sync() -> bool:
                 _sync_rates(tariff, "standing", now)
     _sync_rates(compare, "unit", now)
     _sync_rates(compare, "standing", now)
+    _sync_comparison(region)
     _meta_set("last_sync", _iso(now))
     return True
 
@@ -306,13 +366,134 @@ def report(days: int = 365, cheap: float = 15.0, expensive: float = 30.0) -> dic
                   "compare_gbp": (r.cmp_cost + r.cmp_sc) / 100, "export_kwh": r.exp_kwh, "export_gbp": r.income / 100}
                  for k, r in daily.iterrows()]
 
+    local_slot = (local.dt.hour * 2 + local.dt.minute // 30).to_numpy()
+    n_days_costed = len(daily)
+    agile_all_in = unit_gbp + sc_gbp
+    tariffs = [{"name": "Your Agile (actual)", "tariff": None, "unit_gbp": unit_gbp, "standing_gbp": sc_gbp,
+                "all_in_gbp": agile_all_in, "all_in_p": totals["all_in_p"], "diff_gbp": 0.0,
+                "min_p": float(imp["rate"].min()), "max_p": float(imp["rate"].max())}]
+    for label, cur in (_meta_get("compare_current", {}) or {}).items():
+        slot_p = np.asarray(cur["slots"])[local_slot]
+        unit = float((imp["kwh"].to_numpy() * slot_p).sum()) / 100
+        stand = cur["standing"] * n_days_costed / 100
+        tariffs.append({"name": label, "tariff": cur["tariff"], "unit_gbp": unit, "standing_gbp": stand,
+                        "all_in_gbp": unit + stand, "all_in_p": (unit + stand) / tot_kwh * 100 if tot_kwh else None,
+                        "diff_gbp": unit + stand - agile_all_in, "min_p": min(cur["slots"]), "max_p": max(cur["slots"])})
+
     h = imp.groupby("hour")
     hourly = [{"hour": int(k), "kw": float(g["kwh"].mean() * 2),  # kWh per half-hour -> average kW
                "paid_p": float((g["kwh"] * g["rate"]).sum() / g["kwh"].sum()) if g["kwh"].sum() else None,
                "market_p": float(g["rate"].mean())} for k, g in h]
     return json.loads(json.dumps({"compare_tariff": compare, "region": _region(meta), "totals": totals,
-                                  "monthly": monthly, "daily": daily_out, "hourly": hourly},
+                                  "monthly": monthly, "daily": daily_out, "hourly": hourly,
+                                  "tariffs": tariffs},
                                  default=_clean), parse_constant=lambda c: None)
+
+
+def _shift_day(u: np.ndarray, r: np.ndarray, frac: float) -> tuple[float, float]:
+    """Move `frac` of a day's energy from its dearest half-hours into its cheapest ones.
+
+    Energy only comes out of a slot you really used, and a cheap slot never takes you above your own busiest
+    half-hour that day (so the plan never needs a bigger heater or charger than you already ran). Stops when no
+    cheaper slot is left. Returns (saving in pence, kWh moved).
+    """
+    left = frac * float(u.sum())
+    room = np.maximum(float(u.max()) - u, 0.0)
+    dst = np.argsort(r)
+    di, saved, moved = 0, 0.0, 0.0
+    for s in np.argsort(-r):
+        if left <= 1e-9 or di >= len(dst):
+            break
+        take = min(float(u[s]), left)
+        while take > 1e-9 and di < len(dst):
+            d = dst[di]
+            if r[d] >= r[s]:
+                di = len(dst)
+                break
+            put = min(take, room[d])
+            if put <= 1e-9:
+                di += 1
+                continue
+            saved += put * (r[s] - r[d])
+            room[d] -= put
+            take -= put
+            left -= put
+            moved += put
+    return saved, moved
+
+
+def winter(season: int | None = None, shift: float = 0.15, slots: int = 8) -> dict:
+    """What a winter (Nov-Feb) cost, and what moving `shift` of the energy out of the dearest half-hours would save.
+
+    `season` is the year the winter starts in (2025 = Nov 2025 to Feb 2026); default is the latest with data.
+    The saving is a what-if on your own readings and the half-hourly prices of the tariff you were on.
+    """
+    meta = _meta_get("account")
+    if not meta:
+        raise LookupError("No usage data yet - run: python -m app.usage")
+    rates = _rate_frames()
+    imp = db.read_df("SELECT ts, kwh FROM usage WHERE kind = 'import' ORDER BY ts")
+    if imp.empty:
+        raise LookupError("No usage data yet - run: python -m app.usage")
+    imp["ts"] = pd.to_datetime(imp["ts"], utc=True)
+    imp["rate"] = _priced(imp, meta["import"]["agreements"], rates)
+    imp = imp.dropna(subset=["rate"])
+    local = imp["ts"].dt.tz_convert(config.TZ)
+    imp["month"] = local.dt.strftime("%Y-%m")
+    imp["date"], imp["hour"] = local.dt.strftime("%Y-%m-%d"), local.dt.hour
+    imp["season"] = np.where(local.dt.month >= 11, local.dt.year, local.dt.year - 1)
+    winter_only = imp[local.dt.month.isin([11, 12, 1, 2]).to_numpy()]
+    seasons = sorted(int(x) for x in winter_only["season"].unique())
+    if not seasons:
+        raise LookupError("No winter (November to February) readings yet")
+    if season not in seasons:  # default: the latest winter with a reasonable amount of data (not one just starting)
+        full = [y for y in seasons if winter_only.loc[winter_only["season"] == y, "date"].nunique() >= 60]
+        season = (full or seasons)[-1]
+    w = winter_only[winter_only["season"] == season].copy()
+
+    shift = min(max(shift, 0.0), 0.6)
+    by_month: dict[str, list[float]] = {}  # month -> [cost p, saving p, kwh]
+    moved_kwh, dear_kwh, dear_cost = 0.0, 0.0, 0.0
+    cheap_by_hour, dear_by_hour, days_used = np.zeros(24), np.zeros(24), 0
+    for _, day in w.groupby("date"):
+        if len(day) < 46:  # a partial day (or a data gap) would make "cheapest slot" meaningless
+            m = day["month"].iloc[0]
+            acc = by_month.setdefault(m, [0.0, 0.0, 0.0])
+            acc[0] += float((day["kwh"] * day["rate"]).sum()); acc[2] += float(day["kwh"].sum())
+            continue
+        u, r, hr = day["kwh"].to_numpy(), day["rate"].to_numpy(), day["hour"].to_numpy()
+        saved, moved = _shift_day(u, r, shift)
+        acc = by_month.setdefault(day["month"].iloc[0], [0.0, 0.0, 0.0])
+        acc[0] += float((u * r).sum()); acc[1] += saved; acc[2] += float(u.sum())
+        moved_kwh += moved
+        order = np.argsort(r)
+        dear = order[-slots:]
+        dear_kwh += float(u[dear].sum()); dear_cost += float((u[dear] * r[dear]).sum())
+        np.add.at(cheap_by_hour, hr[order[:slots]], 1)
+        np.add.at(dear_by_hour, hr[dear], 1)
+        days_used += 1
+
+    tot_kwh = float(w["kwh"].sum())
+    cost = sum(v[0] for v in by_month.values()) / 100
+    saving = sum(v[1] for v in by_month.values()) / 100
+    monthly = [{"month": k, "kwh": v[2], "cost_gbp": v[0] / 100, "new_cost_gbp": (v[0] - v[1]) / 100, "saving_gbp": v[1] / 100}
+               for k, v in sorted(by_month.items())]
+    n = max(days_used, 1)
+    hourly = [{"hour": int(h), "kw": float(g["kwh"].mean() * 2),
+               "paid_p": float((g["kwh"] * g["rate"]).sum() / g["kwh"].sum()) if g["kwh"].sum() else None,
+               "market_p": float(g["rate"].mean()), "cheap_slots": float(cheap_by_hour[h] / n),
+               "dear_slots": float(dear_by_hour[h] / n)} for h, g in w.groupby("hour")]
+    out = {
+        "season": season, "seasons": seasons, "start": w["date"].min(), "end": w["date"].max(),
+        "days": int(w["date"].nunique()), "shift": shift, "slots": slots,
+        "totals": {"kwh": tot_kwh, "cost_gbp": cost, "avg_p": cost / tot_kwh * 100 if tot_kwh else None,
+                   "new_cost_gbp": cost - saving, "saving_gbp": saving, "saving_pct": saving / cost if cost else None,
+                   "new_avg_p": (cost - saving) / tot_kwh * 100 if tot_kwh else None, "moved_kwh": moved_kwh,
+                   "dear_kwh": dear_kwh, "dear_share": dear_kwh / tot_kwh if tot_kwh else None,
+                   "dear_cost_gbp": dear_cost / 100, "dear_avg_p": dear_cost / dear_kwh if dear_kwh else None},
+        "monthly": monthly, "hourly": hourly,
+    }
+    return json.loads(json.dumps(out, default=_clean), parse_constant=lambda c: None)
 
 
 def main():

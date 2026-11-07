@@ -112,7 +112,17 @@ def index():
 
 @app.get("/usage", include_in_schema=False)
 def usage_page():
-    return _page("usage.html", ("/static/usage.js", "/static/style.css"))
+    return _page("usage.html", ("/static/common.js", "/static/usage.js", "/static/style.css"))
+
+
+@app.get("/compare", include_in_schema=False)
+def compare_page():
+    return _page("compare.html", ("/static/common.js", "/static/compare.js", "/static/style.css"))
+
+
+@app.get("/winter", include_in_schema=False)
+def winter_page():
+    return _page("winter.html", ("/static/common.js", "/static/winter.js", "/static/style.css"))
 
 
 # --------------------------------------------------------------------------- API
@@ -152,6 +162,19 @@ def usage_report(days: int = Query(365, ge=0, le=1500, description="Days of data
         raise HTTPException(404, "Not configured: set OCTOPUS_API_KEY and OCTOPUS_ACCOUNT on the server")
     try:
         return usage.report(days, cheap, expensive)
+    except LookupError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/usage/winter")
+def usage_winter(season: Optional[int] = Query(None, description="Year the winter starts in (2025 = Nov 2025 to Feb 2026)"),
+                 shift: float = Query(0.15, ge=0, le=0.6, description="Share of energy moved out of the dearest half-hours"),
+                 slots: int = Query(8, ge=2, le=16, description="How many half-hours a day count as dear / cheap")):
+    """Winter cost, and what moving usage out of the dearest half-hours into the cheapest would save."""
+    if not usage.configured():
+        raise HTTPException(404, "Not configured: set OCTOPUS_API_KEY and OCTOPUS_ACCOUNT on the server")
+    try:
+        return usage.winter(season, shift, slots)
     except LookupError as e:
         raise HTTPException(503, str(e))
 

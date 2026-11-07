@@ -156,3 +156,6 @@ select:disabled { opacity: 0.45; }
 @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
 .setup code, .setup pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; font-size: 13px; }
 .setup pre { padding: 10px 12px; overflow: auto; }
+.slider { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.slider span { font-weight: 600; font-size: 14px; }
+.slider input[type=range] { width: 100%; accent-color: var(--accent); }

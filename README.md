@@ -4,7 +4,7 @@ A self-hosted forecaster for Octopus **Agile** electricity prices, up to 14 days
 
 - Web UI with forecast vs actual prices, a calibrated 10–90% range, earlier-forecast overlays and generation/demand inputs
 - JSON API (easy to use from Home Assistant)
-- Optional **My usage** page (`/usage`): your own half-hourly smart-meter usage, costed on the tariff you were on, with export income and a comparison against Flexible Octopus
+- Optional personal pages, once your Octopus details are added: **My usage** (`/usage`, your half-hourly usage costed on the tariff you were on, with export income and a daily cost chart), **Compare tariffs** (`/compare`, your usage priced on Cosy, Go and Flexible at today's rates) and **Winter savings** (`/winter`, what moving usage out of the dearest half-hours would save)
 - Stores every forecast run and scores it against the published prices, so you can see how accurate it is by days ahead
 
 ## How it works
@@ -118,6 +118,7 @@ Then restart and run an update (`systemctl restart agile-forecast && systemctl s
 - The page has no login. Anyone who can reach the dashboard can see your usage, so keep it on your home network.
 - Costs use the tariff in force at the time (from your account's agreement history), at the lowest published rate (direct debit), VAT included, plus the standing charge. They can differ slightly from your bills.
 - Export income works for single-rate export tariffs such as Outgoing Octopus. Time-of-use tariffs such as Flux are not costed.
+- `/compare` prices your usage on the other tariffs at today's rates, so it shows what each would cost for your habits now, not what it cost in the past. `/winter` is a what-if on your own readings and Agile prices.
 - You can run just this sync with `python -m app.usage`.
 
 ## API
@@ -132,6 +133,7 @@ Interactive docs are at `/docs`. Regions are `X` (national average) or `A`–`P`
 | `GET /api/{region}/chart?days=7&history_days=2&previous=3` | Everything the chart uses (forecast, actuals, earlier runs, inputs) |
 | `GET /api/{region}/accuracy?days=30` | MAE and range coverage by days ahead, plus the MAE of each run |
 | `GET /api/usage/report?days=365` | Your costed usage (only when My usage is set up): totals, monthly and daily series, hourly profile |
+| `GET /api/usage/winter?season=2025&shift=0.15` | Winter cost and the saving from moving a share of usage to the cheapest half-hours |
 | `GET /api/status` | Time of the latest run and its holdout error |
 | `GET /api/regions` | Region codes and names |
 
