@@ -301,9 +301,10 @@ def report(days: int = 365, cheap: float = 15.0, expensive: float = 30.0) -> dic
     monthly = [{"month": k, "kwh": r.kwh, "cost_gbp": (r.cost + r.sc) / 100, "avg_p": r.cost / r.kwh if r.kwh else None,
                 "compare_gbp": (r.cmp_cost + r.cmp_sc) / 100, "export_kwh": r.exp_kwh, "export_gbp": r.income / 100}
                for k, r in m.iterrows()]
-    recent = daily.tail(120)
-    daily_out = [{"date": k, "kwh": r.kwh, "cost_gbp": (r.cost + r.sc) / 100, "avg_p": r.cost / r.kwh if r.kwh else None,
-                  "export_kwh": r.exp_kwh} for k, r in recent.iterrows()]
+    daily_out = [{"date": k, "kwh": r.kwh, "unit_gbp": r.cost / 100, "standing_gbp": r.sc / 100,
+                  "cost_gbp": (r.cost + r.sc) / 100, "avg_p": r.cost / r.kwh if r.kwh else None,
+                  "compare_gbp": (r.cmp_cost + r.cmp_sc) / 100, "export_kwh": r.exp_kwh, "export_gbp": r.income / 100}
+                 for k, r in daily.iterrows()]
 
     h = imp.groupby("hour")
     hourly = [{"hour": int(k), "kw": float(g["kwh"].mean() * 2),  # kWh per half-hour -> average kW

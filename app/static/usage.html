@@ -70,6 +70,19 @@ OCTOPUS_ACCOUNT=A-1234ABCD</pre>
     </div>
 
     <section class="panel">
+      <div class="usage-bar">
+        <h2>Daily cost in a month</h2>
+        <div class="day-nav">
+          <button id="month-prev" type="button" aria-label="Previous month">◀</button>
+          <select id="month" aria-label="Month"></select>
+          <button id="month-next" type="button" aria-label="Next month">▶</button>
+        </div>
+      </div>
+      <p class="hint" id="month-hint"></p>
+      <div id="cost-chart" class="chart"></div>
+    </section>
+
+    <section class="panel">
       <h2>Months</h2>
       <div class="table-wrap">
         <table>

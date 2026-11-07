@@ -84,7 +84,51 @@ function renderHourly(hourly) {
   }), plotConfig);
 }
 
+let report = null;
+
+function renderMonthCost() {
+  const month = $("month").value;
+  const days = report.daily.filter((d) => d.date.startsWith(month));
+  const x = days.map((d) => d.date);
+  const sum = (k) => days.reduce((a, d) => a + (d[k] || 0), 0);
+  const worst = days.reduce((a, d) => (a == null || d.cost_gbp > a.cost_gbp ? d : a), null);
+  $("month-hint").innerHTML = days.length
+    ? `<b>${gbp(sum("cost_gbp"))}</b> over ${days.length} day${days.length === 1 ? "" : "s"} (${gbp(sum("cost_gbp") / days.length)} a day on average), ` +
+      `${gbp(sum("export_gbp"))} export income. Dearest day: ${new Date(worst.date + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} at ${gbp(worst.cost_gbp)}.`
+    : "No data for this month.";
+  Plotly.react("cost-chart", [
+    { type: "bar", name: "Electricity", x, y: days.map((d) => d.unit_gbp), marker: { color: css("--accent") },
+      hovertemplate: "£%{y:.2f}" },
+    { type: "bar", name: "Standing charge", x, y: days.map((d) => d.standing_gbp), marker: { color: css("--prev") },
+      hovertemplate: "£%{y:.2f}" },
+    { type: "scatter", mode: "lines+markers", name: "Flexible Octopus (same usage)", x, y: days.map((d) => d.compare_gbp),
+      line: { color: css("--actual"), width: 2, dash: "dot" }, marker: { size: 4 }, hovertemplate: "£%{y:.2f}" },
+    { type: "scatter", mode: "lines+markers", name: "Export income", x, y: days.map((d) => d.export_gbp),
+      line: { color: css("--solar"), width: 2 }, marker: { size: 4 }, hovertemplate: "£%{y:.2f}" },
+  ], baseLayout({
+    barmode: "stack",
+    margin: { l: 52, r: 12, t: 8, b: 40 },
+    yaxis: { title: axisTitle("£ per day"), gridcolor: css("--grid"), zerolinecolor: css("--border"), rangemode: "tozero" },
+    xaxis: { gridcolor: css("--grid"), linecolor: css("--border"), type: "date", tickformat: "%-d", dtick: 864e5 * (innerWidth < 600 ? 3 : 1),
+             hoverformat: "%a %d %b" },
+  }), plotConfig);
+}
+
+function setupMonthPicker(monthly) {
+  const sel = $("month"), prev = sel.value;
+  const months = monthly.map((m) => m.month);
+  sel.innerHTML = [...months].reverse().map((m) => `<option value="${m}">${new Date(m + "-01T12:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</option>`).join("");
+  sel.value = months.includes(prev) ? prev : months[months.length - 1];
+  const step = (d) => { const i = months.indexOf(sel.value) + d; if (i >= 0 && i < months.length) { sel.value = months[i]; sync(); } };
+  const sync = () => { $("month-prev").disabled = months.indexOf(sel.value) <= 0; $("month-next").disabled = months.indexOf(sel.value) >= months.length - 1; renderMonthCost(); };
+  sel.onchange = sync;
+  $("month-prev").onclick = () => step(-1);
+  $("month-next").onclick = () => step(1);
+  sync();
+}
+
 function renderDaily(daily) {
+  daily = daily.slice(-120);
   const x = daily.map((d) => d.date);
   Plotly.react("daily-chart", [
     { type: "bar", name: "Used (kWh)", x, y: daily.map((d) => d.kwh), marker: { color: css("--demand") },
@@ -120,7 +164,9 @@ async function load() {
   renderHourly(r.hourly);
   renderDaily(r.daily);
   renderMonths(r.monthly, name);
-  show("content");
+  report = r;
+  show("content");  // the chart needs a visible container to size itself
+  setupMonthPicker(r.monthly);
 }
 
 async function init() {
@@ -135,7 +181,7 @@ async function init() {
     return show("empty");
   }
   await load();
-  addEventListener("resize", () => { for (const id of ["monthly-chart", "hourly-chart", "daily-chart"]) Plotly.Plots.resize(id); });
+  addEventListener("resize", () => { for (const id of ["monthly-chart", "hourly-chart", "daily-chart", "cost-chart"]) Plotly.Plots.resize(id); });
 }
 
 function fail(e) {
