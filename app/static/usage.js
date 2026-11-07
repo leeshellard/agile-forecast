@@ -1,40 +1,6 @@
-const $ = (id) => document.getElementById(id);
-const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-
 const PREF_KEY = "agile-usage-prefs";
 const loadPref = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } };
 const savePref = (p) => { try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* storage unavailable */ } };
-
-async function getJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => ({}))).detail || r.statusText), { status: r.status });
-  return r.json();
-}
-
-const gbp = (v) => (v == null ? "–" : (v < 0 ? "−£" : "£") + Math.abs(v).toLocaleString("en-GB", { maximumFractionDigits: v >= 100 ? 0 : 2, minimumFractionDigits: v >= 100 ? 0 : 2 }));
-const num = (v, d = 0) => (v == null ? "–" : v.toLocaleString("en-GB", { maximumFractionDigits: d, minimumFractionDigits: d }));
-const pct = (v) => (v == null ? "–" : Math.round(v * 100) + "%");
-const monthName = (m) => new Date(m + "-01T12:00:00").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-
-function baseLayout(extra = {}) {
-  const narrow = innerWidth < 600;
-  return {
-    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
-    font: { color: css("--text"), family: "system-ui, sans-serif", size: 12 },
-    margin: { l: 52, r: 52, t: 8, b: 40 },
-    legend: { orientation: "h", y: narrow ? -0.35 : -0.2, font: { color: css("--muted") } },
-    hovermode: "x unified",
-    xaxis: { gridcolor: css("--grid"), linecolor: css("--border"), automargin: true },
-    yaxis: { gridcolor: css("--grid"), zerolinecolor: css("--border") },
-    ...extra,
-  };
-}
-const axisTitle = (text) => ({ text, font: { color: css("--muted") } });
-const plotConfig = { responsive: true, displaylogo: false, displayModeBar: false };
-
-function card(label, value, sub, cls = "") {
-  return `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div><div class="sub">${sub || "&nbsp;"}</div></div>`;
-}
 
 function renderCards(t, cmpName) {
   const saving = t.saving_gbp;
@@ -149,14 +115,10 @@ function renderMonths(monthly, cmpName) {
     `<td>${gbp(m.compare_gbp)}</td><td>${num(m.export_kwh)}</td><td>${gbp(m.export_gbp)}</td></tr>`).join("");
 }
 
-function show(which) {
-  for (const id of ["setup", "empty", "content"]) $(id).hidden = id !== which;
-}
-
 async function load() {
   const days = $("period").value;
   const r = await getJSON(`/api/usage/report?days=${days}`);
-  const name = r.compare_tariff.includes("VAR-22-11-01") ? "Flexible Octopus" : "comparison tariff";
+  const name = FLEX_NAME(r);
   const t = r.totals;
   $("subtitle").textContent = `${t.start} to ${t.end} · region ${r.region}`;
   renderCards(t, name);
@@ -173,20 +135,9 @@ async function init() {
   const prefs = loadPref();
   if (prefs.period && [...$("period").options].some((o) => o.value === prefs.period)) $("period").value = prefs.period;
   $("period").addEventListener("change", () => { savePref({ period: $("period").value }); load().catch(fail); });
-  const st = await getJSON("/api/usage/status");
-  if (!st.configured) { $("status").textContent = "Not set up"; return show("setup"); }
-  $("status").textContent = st.last_sync ? `Synced ${new Date(st.last_sync).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}` : "Not synced yet";
-  if (!st.synced) {
-    $("empty-msg").innerHTML = "No readings downloaded yet. Run <code>systemctl start agile-forecast-update.service</code> on the server (or <code>python -m app.usage</code>), then reload.";
-    return show("empty");
-  }
+  if (!(await gate())) return;
   await load();
   addEventListener("resize", () => { for (const id of ["monthly-chart", "hourly-chart", "daily-chart", "cost-chart"]) Plotly.Plots.resize(id); });
-}
-
-function fail(e) {
-  $("empty-msg").textContent = e.message;
-  show("empty");
 }
 
 init().catch(fail);

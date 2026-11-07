@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Winter savings · Agile Forecast</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M18 2 6 18h8l-2 12 12-16h-8z' fill='%23e6457a'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">⚡ Agile Forecast</div>
+    <a class="navlink" href="/">Forecast</a>
+    <a class="navlink" href="/usage">My usage</a>
+    <a class="navlink" href="/compare">Compare tariffs</a>
+    <a class="navlink on" href="/winter">Winter savings</a>
+    <div id="status" class="status">Loading…</div>
+  </header>
+
+  <div id="setup" class="usage" hidden>
+    <section class="panel setup">
+      <h2>Switch on My usage</h2>
+      <p>This page uses your own smart-meter readings. It is off until the server has your Octopus details; see the
+         <a href="/usage">My usage</a> page for how to add them.</p>
+    </section>
+  </div>
+
+  <div id="empty" class="usage" hidden>
+    <section class="panel"><p id="empty-msg" class="empty"></p></section>
+  </div>
+
+  <div id="content" class="usage" hidden>
+    <div class="usage-bar">
+      <div>
+        <h1 style="text-align:left;margin:0">Winter savings</h1>
+        <p id="subtitle" class="subtitle" style="text-align:left;margin:0"></p>
+      </div>
+      <label class="inline">Winter
+        <select id="season"></select>
+      </label>
+    </div>
+
+    <section class="panel">
+      <h2>What if you moved some usage to cheaper slots?</h2>
+      <p class="hint">A what-if on your own readings. For each day, take this share of your energy out of that day's dearest half-hours
+        and put it into the cheapest ones, then re-price it. Nothing is moved above your own busiest half-hour that day, so it never needs
+        a bigger heater or charger than you already ran. Standing charge isn't affected, so it's left out.</p>
+      <label class="slider">
+        <span>Share of energy you could move: <b id="shift-label">15%</b></span>
+        <input id="shift" type="range" min="0" max="40" step="5" value="15">
+        <small>Heat pumps, hot water and EV charging are the usual candidates. Anything you can't schedule stays where it is, so be cautious above 20%.</small>
+      </label>
+    </section>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="grid2">
+      <section class="panel">
+        <h2>When the cheap and dear slots are</h2>
+        <p class="hint">How many of each day's 8 cheapest and 8 dearest half-hours fall in each hour, averaged over the winter.</p>
+        <div id="slots-chart" class="chart chart-short"></div>
+      </section>
+      <section class="panel">
+        <h2>When you use power</h2>
+        <p class="hint">Your average demand by hour, and the price you paid for it.</p>
+        <div id="hourly-chart" class="chart chart-short"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>Month by month</h2>
+      <div id="month-chart" class="chart chart-short"></div>
+      <div class="table-wrap" style="max-height:none">
+        <table>
+          <thead><tr><th>Month</th><th>Used (kWh)</th><th>Electricity (£)</th><th>After moving (£)</th><th>Saving (£)</th></tr></thead>
+          <tbody id="month-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <footer>Winter is November to February. Days with missing readings are left out of the saving. The saving is an estimate:
+    Agile prices vary from day to day, and the dearest and cheapest slots are known only once prices are published (about 4pm the day before).</footer>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/winter.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compare tariffs · Agile Forecast</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M18 2 6 18h8l-2 12 12-16h-8z' fill='%23e6457a'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">⚡ Agile Forecast</div>
+    <a class="navlink" href="/">Forecast</a>
+    <a class="navlink" href="/usage">My usage</a>
+    <a class="navlink on" href="/compare">Compare tariffs</a>
+    <a class="navlink" href="/winter">Winter savings</a>
+    <div id="status" class="status">Loading…</div>
+  </header>
+
+  <div id="setup" class="usage" hidden>
+    <section class="panel setup">
+      <h2>Switch on My usage</h2>
+      <p>This page uses your own smart-meter readings. It is off until the server has your Octopus details; see the
+         <a href="/usage">My usage</a> page for how to add them.</p>
+    </section>
+  </div>
+
+  <div id="empty" class="usage" hidden>
+    <section class="panel"><p id="empty-msg" class="empty"></p></section>
+  </div>
+
+  <div id="content" class="usage" hidden>
+    <div class="usage-bar">
+      <div>
+        <h1 style="text-align:left;margin:0">Compare tariffs</h1>
+        <p id="subtitle" class="subtitle" style="text-align:left;margin:0"></p>
+      </div>
+      <label class="inline">Period
+        <select id="period">
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365" selected>Last 12 months</option>
+          <option value="0">All data</option>
+        </select>
+      </label>
+    </div>
+
+    <section class="panel">
+      <h2>What your usage would cost</h2>
+      <p class="hint">Your usage in the period, priced on each tariff at <b>today's rates</b>, VAT and standing charge included.
+        The Agile row is what you actually paid. Your usage is shaped by Agile's prices (you avoid 4–7pm and use cheap overnight and midday slots),
+        so on a different tariff you would probably change when you use power, for better or worse.</p>
+      <div class="grid2">
+        <div class="table-wrap" style="max-height:none">
+          <table>
+            <thead><tr><th>Tariff</th><th>Cost (£)</th><th>Per kWh</th><th>Price range</th><th>vs your Agile</th></tr></thead>
+            <tbody id="tariff-rows"></tbody>
+          </table>
+        </div>
+        <div id="tariff-chart" class="chart chart-short"></div>
+      </div>
+    </section>
+  </div>
+
+  <footer>Rates: Octopus Energy API, direct debit, VAT included, for your region. A guide only: fixed and variable prices change, and a tariff that suits one household's habits can suit another's badly.</footer>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/compare.js"></script>
+</body>
+</html>
