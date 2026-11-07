@@ -4,6 +4,7 @@ A self-hosted forecaster for Octopus **Agile** electricity prices, up to 14 days
 
 - Web UI with forecast vs actual prices, a calibrated 10–90% range, earlier-forecast overlays and generation/demand inputs
 - JSON API (easy to use from Home Assistant)
+- Optional **My usage** page (`/usage`): your own half-hourly smart-meter usage, costed on the tariff you were on, with export income and a comparison against Flexible Octopus
 - Stores every forecast run and scores it against the published prices, so you can see how accurate it is by days ahead
 
 ## How it works
@@ -100,6 +101,25 @@ systemctl list-timers agile-forecast-update.timer
 nano /etc/agile-forecast.env && systemctl restart agile-forecast
 ```
 
+## My usage page (optional)
+
+`/usage` shows what you actually used and paid: totals, monthly cost against a comparison tariff, your demand and the price you paid by time of day, and daily usage. It needs a smart meter that reports half-hourly readings.
+
+Add your details to `/etc/agile-forecast.env`:
+
+```
+OCTOPUS_API_KEY=sk_live_...
+OCTOPUS_ACCOUNT=A-1234ABCD
+```
+
+Then restart and run an update (`systemctl restart agile-forecast && systemctl start agile-forecast-update.service`). The first sync downloads about two years of readings. After that each scheduled update adds the new ones.
+
+- Your API key stays on the server. The browser only receives costed results, and nothing personal is committed to the repository (the database is git-ignored).
+- The page has no login. Anyone who can reach the dashboard can see your usage, so keep it on your home network.
+- Costs use the tariff in force at the time (from your account's agreement history), at the lowest published rate (direct debit), VAT included, plus the standing charge. They can differ slightly from your bills.
+- Export income works for single-rate export tariffs such as Outgoing Octopus. Time-of-use tariffs such as Flux are not costed.
+- You can run just this sync with `python -m app.usage`.
+
 ## API
 
 Interactive docs are at `/docs`. Regions are `X` (national average) or `A`–`P`.
@@ -111,6 +131,7 @@ Interactive docs are at `/docs`. Regions are `X` (national average) or `A`–`P`
 | `GET /api/{region}/rss?days=14` | RSS feed of published prices, one post per day with a summary and half-hourly table. The next day's post appears after the 16:20 update. |
 | `GET /api/{region}/chart?days=7&history_days=2&previous=3` | Everything the chart uses (forecast, actuals, earlier runs, inputs) |
 | `GET /api/{region}/accuracy?days=30` | MAE and range coverage by days ahead, plus the MAE of each run |
+| `GET /api/usage/report?days=365` | Your costed usage (only when My usage is set up): totals, monthly and daily series, hourly profile |
 | `GET /api/status` | Time of the latest run and its holdout error |
 | `GET /api/regions` | Region codes and names |
 
@@ -156,6 +177,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `AGILE_REFRESH_DAYS` | `10` | Days re-fetched on each update |
 | `AGILE_KEEP_RUNS_DAYS` | `180` | How long stored forecast runs are kept |
 | `AGILE_CALIBRATION_DAYS` | `28` | Days of scored past forecasts used to calibrate the 10–90% range |
+| `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT` | blank | Switch on the My usage page |
+| `USAGE_COMPARE_PRODUCT` | `VAR-22-11-01` | Product your cost is compared with (Flexible Octopus) |
+| `USAGE_HISTORY_DAYS` | `730` | How far back the first usage sync goes |
 
 ## Notes and limitations
 

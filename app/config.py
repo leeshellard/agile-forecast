@@ -19,6 +19,13 @@ KEEP_RUNS_DAYS = int(os.environ.get("AGILE_KEEP_RUNS_DAYS", "180"))
 # of past forecasts.
 CALIBRATION_DAYS = int(os.environ.get("AGILE_CALIBRATION_DAYS", "28"))
 
+# "My usage" page. Both must be set to switch it on; the key never leaves the server.
+OCTOPUS_API_KEY = os.environ.get("OCTOPUS_API_KEY", "").strip()
+OCTOPUS_ACCOUNT = os.environ.get("OCTOPUS_ACCOUNT", "").strip()
+# Product the page compares your actual cost against (default: Flexible Octopus, the price-cap tariff).
+USAGE_COMPARE_PRODUCT = os.environ.get("USAGE_COMPARE_PRODUCT", "VAR-22-11-01")
+USAGE_HISTORY_DAYS = int(os.environ.get("USAGE_HISTORY_DAYS", "730"))
+
 MAX_HORIZON_DAYS = 14
 PRICE_CAP = 100.0  # Agile import cap, p/kWh inc VAT
 TZ = "Europe/London"

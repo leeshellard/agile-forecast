@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, model
+from . import config, db, model, usage
 
 app = FastAPI(title="Agile Forecast", version="1.0")
 STATIC = config.BASE_DIR / "app" / "static"
@@ -96,14 +96,23 @@ def _asset_version() -> str:
     return format(int(max(f.stat().st_mtime for f in STATIC.iterdir() if f.is_file())), "x")
 
 
-@app.get("/", include_in_schema=False)
-def index():
-    html = (STATIC / "index.html").read_text()
+def _page(name: str, assets: tuple[str, ...]) -> HTMLResponse:
+    html = (STATIC / name).read_text()
     v = _asset_version()
-    for asset in ("/static/app.js", "/static/style.css"):
+    for asset in assets:
         html = html.replace(f'"{asset}"', f'"{asset}?v={v}"')
     # The page itself must never be cached, or it would keep pointing at old asset versions.
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return _page("index.html", ("/static/app.js", "/static/style.css"))
+
+
+@app.get("/usage", include_in_schema=False)
+def usage_page():
+    return _page("usage.html", ("/static/usage.js", "/static/style.css"))
 
 
 # --------------------------------------------------------------------------- API
@@ -126,6 +135,25 @@ def status():
         "latest_run": {"id": int(r["id"]), "created_at": _iso(r["created_at"]),
                        "train_rows": int(r["train_rows"]), "holdout_mae": round(float(r["holdout_mae"]), 2)},
     }
+
+
+@app.get("/api/usage/status")
+def usage_status():
+    """Whether the 'My usage' page is switched on and how fresh its data is."""
+    return usage.status()
+
+
+@app.get("/api/usage/report")
+def usage_report(days: int = Query(365, ge=0, le=1500, description="Days of data to include; 0 = everything"),
+                 cheap: float = Query(15.0, description="p/kWh below which a half-hour counts as cheap"),
+                 expensive: float = Query(30.0, description="p/kWh above which a half-hour counts as expensive")):
+    """Your costed usage: totals, monthly and daily series, and the time-of-day profile."""
+    if not usage.configured():
+        raise HTTPException(404, "Not configured: set OCTOPUS_API_KEY and OCTOPUS_ACCOUNT on the server")
+    try:
+        return usage.report(days, cheap, expensive)
+    except LookupError as e:
+        raise HTTPException(503, str(e))
 
 
 @app.get("/api/{region}")
