@@ -129,7 +129,7 @@ Interactive docs are at `/docs`. Regions are `X` (national average) or `A`–`P`
 |---|---|
 | `GET /api/{region}?days=7&forecast_count=1` | Latest forecast run(s): `[{name, region, created_at, prices: [{date_time, agile_pred, agile_low, agile_high}]}]` |
 | `GET /api/{region}/actual?days=7` | Published Agile prices |
-| `GET /api/{region}/rss?days=14` | RSS feed of published prices, one post per day with a summary and half-hourly table. The next day's post appears after the 16:20 update. |
+| `GET /api/{region}/rss?days=14` | RSS feed of published prices, one post per day with a summary and half-hourly table. The next day's post appears after the 16:07 update. |
 | `GET /api/{region}/chart?days=7&history_days=2&previous=3` | Everything the chart uses (forecast, actuals, earlier runs, inputs) |
 | `GET /api/{region}/accuracy?days=30` | MAE and range coverage by days ahead, plus the MAE of each run |
 | `GET /api/usage/report?days=365` | Your costed usage (only when My usage is set up): totals, monthly and daily series, hourly profile |
