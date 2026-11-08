@@ -255,9 +255,11 @@ def rss(region: str, request: Request, days: int = Query(14, ge=1, le=60)):
     link = str(request.base_url)
     items = []
     for date, day in sorted(act.groupby("date"), reverse=True):
-        # Only whole days (46-50 half-hours allows for the clock changes); today's partial history is skipped.
+        # Skip days with gaps. Octopus publishes up to 23:00 the next day, so the day's last two half-hours
+        # (23:00 and 23:30) only arrive with the following afternoon's prices: allow those to be missing, which
+        # lets tomorrow's post appear at about 16:00 instead of a day later.
         n_expected = int(((date + pd.DateOffset(days=1)) - date) / pd.Timedelta(minutes=30))
-        if len(day) == n_expected:
+        if len(day) >= n_expected - 2 and day["local"].iloc[0] == date:
             items.append(_day_item(region, date, day.reset_index(drop=True), link))
     name = escape(f"Agile prices - {config.REGIONS[region]} ({region})")
     xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
