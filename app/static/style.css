@@ -159,3 +159,10 @@ select:disabled { opacity: 0.45; }
 .slider { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
 .slider span { font-weight: 600; font-size: 14px; }
 .slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.yoy-table { max-height: none; margin-top: 8px; }
+.yoy-table thead tr:first-child th { top: 0; text-align: center; }
+.yoy-table thead tr:nth-child(2) th { top: 26px; }
+.yoy-table tfoot td { font-weight: 700; border-top: 2px solid var(--border); }
+.yoy-table .down { color: var(--good); }
+.yoy-table .up { color: var(--accent); }
+.yoy-table .part { color: var(--muted); font-size: 11px; }

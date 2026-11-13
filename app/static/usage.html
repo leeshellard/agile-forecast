@@ -58,6 +58,25 @@ OCTOPUS_ACCOUNT=A-1234ABCD</pre>
       <div id="monthly-chart" class="chart"></div>
     </section>
 
+    <section class="panel">
+      <h2>This year vs last year</h2>
+      <p class="hint" id="yoy-hint"></p>
+      <div class="grid2">
+        <div id="yoy-kwh-chart" class="chart chart-short"></div>
+        <div id="yoy-cost-chart" class="chart chart-short"></div>
+      </div>
+      <div class="table-wrap yoy-table">
+        <table>
+          <thead>
+            <tr><th rowspan="2">Month</th><th colspan="3">Used (kWh)</th><th colspan="3">Cost incl. standing (£)</th><th colspan="2">All-in price (p/kWh)</th></tr>
+            <tr><th>This year</th><th>Last year</th><th>Change</th><th>This year</th><th>Last year</th><th>Change</th><th>This year</th><th>Last year</th></tr>
+          </thead>
+          <tbody id="yoy-rows"></tbody>
+          <tfoot id="yoy-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+
     <div class="grid2">
       <section class="panel">
         <h2>Time of day</h2>
