@@ -166,6 +166,12 @@ def usage_report(days: int = Query(365, ge=0, le=1500, description="Days of data
         raise HTTPException(503, str(e))
 
 
+@app.get("/api/usage/energy")
+def usage_energy():
+    """Daily solar generated and whole-house use (kWh) from ENERGY_URL, for the year-on-year comparison."""
+    return usage.energy()
+
+
 @app.get("/api/usage/winter")
 def usage_winter(season: Optional[int] = Query(None, description="Year the winter starts in (2025 = Nov 2025 to Feb 2026)"),
                  shift: float = Query(0.15, ge=0, le=0.6, description="Share of energy moved out of the dearest half-hours"),

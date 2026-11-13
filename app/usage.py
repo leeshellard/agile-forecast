@@ -390,6 +390,31 @@ def report(days: int = 365, cheap: float = 15.0, expensive: float = 30.0) -> dic
                                  default=_clean), parse_constant=lambda c: None)
 
 
+_energy_cache: dict = {"at": 0.0, "data": None}
+
+
+def energy() -> dict:
+    """Daily solar generated and whole-house use from ENERGY_URL (a Battery Planner install), cached for 30 min.
+    Never raises: when it is not set or not reachable the page simply leaves the solar figures out."""
+    import time
+    if not config.ENERGY_URL:
+        return {"available": False, "days": []}
+    now = time.time()
+    if _energy_cache["data"] is not None and now - _energy_cache["at"] < 1800:
+        return _energy_cache["data"]
+    try:
+        r = requests.get(config.ENERGY_URL, timeout=90, headers={"User-Agent": config.USER_AGENT})
+        r.raise_for_status()
+        days = [{"date": d["date"], "solar_kwh": d.get("solar_kwh"), "house_kwh": d.get("house_kwh")}
+                for d in r.json().get("days", [])]
+        out = {"available": bool(days), "days": days}
+    except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+        log.warning("Could not fetch solar/house totals from %s: %s", config.ENERGY_URL, e)
+        return _energy_cache["data"] or {"available": False, "days": [], "error": "Solar figures unavailable"}
+    _energy_cache.update(at=now, data=out)
+    return out
+
+
 def _shift_day(u: np.ndarray, r: np.ndarray, frac: float) -> tuple[float, float]:
     """Move `frac` of a day's energy from its dearest half-hours into its cheapest ones.
 
