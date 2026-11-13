@@ -103,7 +103,7 @@ nano /etc/agile-forecast.env && systemctl restart agile-forecast
 
 ## My usage page (optional)
 
-`/usage` shows what you actually used and paid: totals, monthly cost against a comparison tariff, your demand and the price you paid by time of day, and daily usage. It needs a smart meter that reports half-hourly readings.
+`/usage` shows what you actually used and paid: totals, monthly cost against a comparison tariff, your demand and the price you paid by time of day, daily usage, and this year against last year month by month (energy used and cost, comparing the same days in both years for part months). It needs a smart meter that reports half-hourly readings.
 
 Add your details to `/etc/agile-forecast.env`:
 

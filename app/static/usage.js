@@ -115,9 +115,101 @@ function renderMonths(monthly, cmpName) {
     `<td>${gbp(m.compare_gbp)}</td><td>${num(m.export_kwh)}</td><td>${gbp(m.export_gbp)}</td></tr>`).join("");
 }
 
+// ---------------------------------------------------------------- this year vs last year
+// Uses every day of data (not the period picker): the latest 12 months against the same months a year earlier.
+// Each month only counts the days present in both years, so a part month (this month so far, or the first
+// month of readings) is compared like for like.
+let yoyDaily = null;
+
+function yoyData(daily) {
+  const byDate = new Map(daily.map((d) => [d.date, d]));
+  const last = daily[daily.length - 1].date.slice(0, 7);
+  const shift = (ym, n) => { const d = new Date(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const rows = [];
+  for (let i = 11; i >= 0; i--) {
+    const m = shift(last, -i), p = shift(m, -12);
+    const inMonth = daily.filter((d) => d.date.startsWith(m));
+    if (!inMonth.length) continue;
+    const pairs = inMonth.map((d) => [d, byDate.get(p + d.date.slice(7))]).filter(([, q]) => q);
+    const use = pairs.length ? pairs : inMonth.map((d) => [d, null]);
+    const sum = (k, j) => use.reduce((a, pr) => a + (pr[j] ? pr[j][k] || 0 : 0), 0);
+    const monthDays = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+    const prior = pairs.length > 0;
+    rows.push({
+      month: m, prev: p, days: use.length, monthDays, prior,
+      kwh: sum("kwh", 0), cost: sum("cost_gbp", 0),
+      pkwh: prior ? sum("kwh", 1) : null, pcost: prior ? sum("cost_gbp", 1) : null,
+      firstDay: +use[0][0].date.slice(8), lastDay: +use[use.length - 1][0].date.slice(8),
+    });
+  }
+  return rows;
+}
+
+const change = (a, b) => (a == null || b == null || !b ? null : (a - b) / b);
+const changeCell = (c) => {
+  if (c == null) return "<td>–</td>";
+  const n = Math.round(c * 100);
+  return `<td class="${n < 0 ? "down" : n > 0 ? "up" : ""}">${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n)}%</td>`;
+};
+const shortMonth = (m) => new Date(m + "-01T12:00:00").toLocaleDateString("en-GB", { month: "short" });
+
+function renderYoY() {
+  if (!yoyDaily || !yoyDaily.length) return;
+  const rows = yoyData(yoyDaily);
+  const both = rows.filter((r) => r.prior);
+  const tot = (k) => both.reduce((a, r) => a + r[k], 0);
+  const T = { kwh: tot("kwh"), cost: tot("cost"), pkwh: tot("pkwh"), pcost: tot("pcost") };
+  const span = (r) => `${shortMonth(r.month)} ${r.month.slice(2, 4)}`;
+  const thisLabel = `${span(rows[0])} – ${span(rows[rows.length - 1])}`;
+  const lastLabel = `${shortMonth(rows[0].prev)} ${rows[0].prev.slice(2, 4)} – ${shortMonth(rows[rows.length - 1].prev)} ${rows[rows.length - 1].prev.slice(2, 4)}`;
+  const partNote = (r) => (r.days < r.monthDays ? (r.lastDay - r.firstDay + 1 === r.days ? `${r.firstDay}–${r.lastDay} only` : `${r.days} days only`) : "");
+
+  const kc = change(T.kwh, T.pkwh), cc = change(T.cost, T.pcost);
+  const word = (c, up, down) => (c == null ? "" : `${Math.abs(Math.round(c * 100))}% ${c >= 0 ? up : down}`);
+  $("yoy-hint").innerHTML = both.length
+    ? `This year is ${thisLabel}, last year is the same months a year earlier. Part months compare the same days in both years. ` +
+      `Over the ${both.length} month${both.length === 1 ? "" : "s"} with both years: <b>${num(T.kwh)} kWh</b> vs ${num(T.pkwh)} kWh (${word(kc, "more", "less")}), ` +
+      `<b>${gbp(T.cost)}</b> vs ${gbp(T.pcost)} (${word(cc, "more", "less")}).`
+    : "Year-on-year needs readings from a year ago; there are none yet.";
+
+  const x = rows.map((r) => shortMonth(r.month) + (r.days < r.monthDays ? "*" : ""));
+  const cd = rows.map((r) => [span(r), `${shortMonth(r.prev)} ${r.prev.slice(2, 4)}`, partNote(r) ? ` (${partNote(r)})` : ""]);
+  const yoyLayout = (title) => baseLayout({
+    barmode: "group",
+    margin: { l: 52, r: 12, t: 28, b: 40 },
+    title: { text: title, font: { size: 13, color: css("--muted") }, x: 0.01, y: 0.98 },
+    yaxis: { gridcolor: css("--grid"), zerolinecolor: css("--border"), rangemode: "tozero" },
+  });
+  const bars = (key, pkey, fmt) => [
+    { type: "bar", name: "Last year", x, y: rows.map((r) => r[pkey]), customdata: cd, marker: { color: css("--prev") },
+      hovertemplate: `%{customdata[1]}%{customdata[2]}: ${fmt}<extra></extra>` },
+    { type: "bar", name: "This year", x, y: rows.map((r) => r[key]), customdata: cd, marker: { color: css("--accent") },
+      hovertemplate: `%{customdata[0]}%{customdata[2]}: ${fmt}<extra></extra>` },
+  ];
+  Plotly.react("yoy-kwh-chart", bars("kwh", "pkwh", "%{y:,.0f} kWh"), yoyLayout("Energy used (kWh)"), plotConfig);
+  Plotly.react("yoy-cost-chart", bars("cost", "pcost", "£%{y:,.2f}"), yoyLayout("Cost incl. standing (£)"), plotConfig);
+
+  const ap = (c, k) => (k ? c / k * 100 : null);
+  $("yoy-rows").innerHTML = [...rows].reverse().map((r) => {
+    const note = partNote(r);
+    return `<tr><td>${monthName(r.month)}${note ? ` <span class="part">${note}</span>` : ""}</td>` +
+      `<td>${num(r.kwh)}</td><td>${num(r.pkwh)}</td>${changeCell(change(r.kwh, r.pkwh))}` +
+      `<td>${gbp(r.cost)}</td><td>${gbp(r.pcost)}</td>${changeCell(change(r.cost, r.pcost))}` +
+      `<td>${num(ap(r.cost, r.kwh), 1)}</td><td>${r.prior ? num(ap(r.pcost, r.pkwh), 1) : "–"}</td></tr>`;
+  }).join("");
+  $("yoy-foot").innerHTML = both.length
+    ? `<tr><td>Total (${both.length} months)</td><td>${num(T.kwh)}</td><td>${num(T.pkwh)}</td>${changeCell(kc)}` +
+      `<td>${gbp(T.cost)}</td><td>${gbp(T.pcost)}</td>${changeCell(cc)}<td>${num(ap(T.cost, T.kwh), 1)}</td><td>${num(ap(T.pcost, T.pkwh), 1)}</td></tr>`
+    : "";
+}
+
 async function load() {
   const days = $("period").value;
-  const r = await getJSON(`/api/usage/report?days=${days}`);
+  const [r, all] = await Promise.all([
+    getJSON(`/api/usage/report?days=${days}`),
+    yoyDaily ? null : days === "0" ? null : getJSON("/api/usage/report?days=0"),
+  ]);
+  if (!yoyDaily) yoyDaily = (all || r).daily;
   const name = FLEX_NAME(r);
   const t = r.totals;
   $("subtitle").textContent = `${t.start} to ${t.end} · region ${r.region}`;
@@ -129,6 +221,7 @@ async function load() {
   report = r;
   show("content");  // the chart needs a visible container to size itself
   setupMonthPicker(r.monthly);
+  renderYoY();
 }
 
 async function init() {
@@ -137,7 +230,7 @@ async function init() {
   $("period").addEventListener("change", () => { savePref({ period: $("period").value }); load().catch(fail); });
   if (!(await gate())) return;
   await load();
-  addEventListener("resize", () => { for (const id of ["monthly-chart", "hourly-chart", "daily-chart", "cost-chart"]) Plotly.Plots.resize(id); });
+  addEventListener("resize", () => { for (const id of ["monthly-chart", "yoy-kwh-chart", "yoy-cost-chart", "hourly-chart", "daily-chart", "cost-chart"]) Plotly.Plots.resize(id); });
 }
 
 init().catch(fail);
