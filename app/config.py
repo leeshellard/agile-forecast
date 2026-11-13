@@ -25,6 +25,9 @@ OCTOPUS_ACCOUNT = os.environ.get("OCTOPUS_ACCOUNT", "").strip()
 # Product the page compares your actual cost against (default: Flexible Octopus, the price-cap tariff).
 USAGE_COMPARE_PRODUCT = os.environ.get("USAGE_COMPARE_PRODUCT", "VAR-22-11-01")
 USAGE_HISTORY_DAYS = int(os.environ.get("USAGE_HISTORY_DAYS", "730"))
+# Optional: daily solar / house-use totals for the year-on-year comparison on My usage, from a Battery Planner
+# (FoxESS) install, e.g. http://192.168.0.23:8080/api/energy/daily. Blank = no solar figures.
+ENERGY_URL = os.environ.get("ENERGY_URL", "").strip()
 
 MAX_HORIZON_DAYS = 14
 PRICE_CAP = 100.0  # Agile import cap, p/kWh inc VAT

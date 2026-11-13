@@ -103,7 +103,7 @@ nano /etc/agile-forecast.env && systemctl restart agile-forecast
 
 ## My usage page (optional)
 
-`/usage` shows what you actually used and paid: totals, monthly cost against a comparison tariff, your demand and the price you paid by time of day, daily usage, and this year against last year month by month (energy used and cost, comparing the same days in both years for part months). It needs a smart meter that reports half-hourly readings.
+`/usage` shows what you actually used and paid: totals, monthly cost against a comparison tariff, your demand and the price you paid by time of day, daily usage, and this year against last year month by month (grid import, cost and, with `ENERGY_URL` set, solar generated and whole-house use; part months compare the same days in both years). It needs a smart meter that reports half-hourly readings.
 
 Add your details to `/etc/agile-forecast.env`:
 
@@ -134,6 +134,7 @@ Interactive docs are at `/docs`. Regions are `X` (national average) or `A`–`P`
 | `GET /api/{region}/accuracy?days=30` | MAE and range coverage by days ahead, plus the MAE of each run |
 | `GET /api/usage/report?days=365` | Your costed usage (only when My usage is set up): totals, monthly and daily series, hourly profile |
 | `GET /api/usage/winter?season=2025&shift=0.15` | Winter cost and the saving from moving a share of usage to the cheapest half-hours |
+| `GET /api/usage/energy` | Daily solar generated and whole-house use from `ENERGY_URL` (when set), for the year-on-year comparison |
 | `GET /api/status` | Time of the latest run and its holdout error |
 | `GET /api/regions` | Region codes and names |
 
@@ -182,6 +183,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `OCTOPUS_API_KEY` / `OCTOPUS_ACCOUNT` | blank | Switch on the My usage page |
 | `USAGE_COMPARE_PRODUCT` | `VAR-22-11-01` | Product your cost is compared with (Flexible Octopus) |
 | `USAGE_HISTORY_DAYS` | `730` | How far back the first usage sync goes |
+| `ENERGY_URL` | blank | Daily solar / whole-house totals for the year-on-year panel, e.g. a Battery Planner install: `http://192.168.0.23:8080/api/energy/daily` |
 
 ## Notes and limitations
 
