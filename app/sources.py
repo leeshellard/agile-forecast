@@ -141,13 +141,22 @@ def fetch_input_forecasts() -> pd.DataFrame:
                            index=pd.DatetimeIndex(pd.to_datetime(wind["Datetime"])).tz_localize("UTC"))
 
     dem = _neso_all(NESO_DEMAND_2_14D)
-    # GDATETIME is the *end* of each half-hour (CTIME runs 0030..2400), so shift back to the period start.
-    dem_idx = pd.DatetimeIndex(pd.to_datetime(dem["GDATETIME"])).tz_localize("UTC") - pd.Timedelta(minutes=30)
-    dem_df = pd.DataFrame({"demand": dem["NATIONALDEMAND"].values}, index=dem_idx)
+    if {"GDATETIME", "NATIONALDEMAND"} <= set(dem.columns) and not dem.empty:
+        # GDATETIME is the *end* of each half-hour (CTIME runs 0030..2400), so shift back to the period start.
+        dem_idx = pd.DatetimeIndex(pd.to_datetime(dem["GDATETIME"])).tz_localize("UTC") - pd.Timedelta(minutes=30)
+        dem_df = pd.DataFrame({"demand": dem["NATIONALDEMAND"].values}, index=dem_idx)
+    else:
+        # NESO occasionally republishes this resource and it is empty for a while; the pipeline then
+        # fills demand from recent history instead of failing the whole update.
+        log.warning("NESO 2-14 day demand forecast is empty (%d rows)", len(dem))
+        dem_df = pd.DataFrame({"demand": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], tz="UTC"))
 
     # Short-term: the demand-update feed includes forecast rows for the next few days.
     upd = _neso_all(NESO_DEMAND_UPDATE)
-    upd = upd[(upd["FORECAST_ACTUAL_INDICATOR"] == "F") & (upd["ND"] > 0)]
+    if {"FORECAST_ACTUAL_INDICATOR", "ND"} <= set(upd.columns):
+        upd = upd[(upd["FORECAST_ACTUAL_INDICATOR"] == "F") & (upd["ND"] > 0)]
+    else:
+        upd = upd.iloc[0:0]
     if not upd.empty:
         upd_df = pd.DataFrame({"demand": upd["ND"].values},
                               index=settlement_to_utc(upd["SETTLEMENT_DATE"], upd["SETTLEMENT_PERIOD"]))
