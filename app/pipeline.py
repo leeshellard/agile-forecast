@@ -24,6 +24,31 @@ def _fill_gaps(future: pd.DataFrame) -> pd.DataFrame:
     return future
 
 
+def _demand_from_history(future: pd.DataFrame, hist: pd.DataFrame, days: int = 14) -> pd.DataFrame:
+    """If NESO has no demand forecast, use the average demand of the last `days` days for the same
+    weekday and time of day. Demand follows a strong weekly pattern, so this is a reasonable stand-in."""
+    if "demand" not in future:
+        future["demand"] = float("nan")
+    missing = future["demand"].isna()
+    if not missing.any() or "demand" not in hist:
+        return future
+    recent = hist["demand"].dropna()
+    if recent.empty:
+        return future
+    recent = recent[recent.index >= recent.index.max() - pd.Timedelta(days=days)]
+    loc = recent.index.tz_convert(config.TZ)
+    profile = recent.groupby([loc.dayofweek, loc.strftime("%H:%M")]).mean()
+    floc = future.index.tz_convert(config.TZ)
+    fill = pd.Series([profile.get(k, float("nan")) for k in zip(floc.dayofweek, floc.strftime("%H:%M"))],
+                     index=future.index)
+    filled = int((missing & fill.notna()).sum())
+    if filled:
+        log.warning("No NESO demand forecast for %d half-hours - using the last %d days' demand "
+                    "for the same weekday and time instead", filled, days)
+    future["demand"] = future["demand"].fillna(fill)
+    return future
+
+
 def update():
     db.init()
     now = pd.Timestamp.now(tz="UTC").floor("30min")
@@ -54,6 +79,7 @@ def update():
     fc_end = min(now + pd.Timedelta(days=config.MAX_HORIZON_DAYS), fc_start + pd.Timedelta(days=config.MAX_HORIZON_DAYS))
     future = sources.fetch_input_forecasts()
     future = _fill_gaps(future)
+    future = _demand_from_history(future, hist)
     future = future[(future.index >= min(now, fc_start)) & (future.index < fc_end)].dropna()
     to_predict = future[future.index >= fc_start]
     if to_predict.empty:
