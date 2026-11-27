@@ -4,6 +4,9 @@ The national-average Agile price is modelled from generation/demand fundamentals
 quantile regression (10/50/90%). Regional prices are then derived with a per-region linear map fitted on
 recent actuals: Agile is linear in the wholesale price plus a 16:00-19:00 peak adder, so
     price_region ~= a * price_national + b * is_peak + c
+
+When the daily wholesale gas price is available, the model predicts price as a multiple of it (gas sets the
+price most of the time, so the daily shape learned when gas was cheap scales up when it is dear).
 """
 from __future__ import annotations
 
@@ -14,11 +17,15 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from . import config
 
 FEATURES = ["demand", "wind", "emb_wind", "emb_solar", "residual", "renewable_share",
-            "hour", "dow", "is_weekend", "is_peak", "price_level"]
+            "hour", "dow", "is_weekend", "is_peak", "price_level", "gas"]
 QUANTILES = {"p10": 0.1, "p50": 0.5, "p90": 0.9}
 LEVEL_WINDOW_DAYS = 14
 LEVEL_LAG_DAYS = 2
-RECENCY_HALF_LIFE_DAYS = 90
+# Backtest on Oct-Nov 2026 (35 daily origins, live forecast inputs): price-as-a-multiple-of-gas with a
+# 30-day half-life cut mean error from 6.40 to 5.95 p/kWh (day ahead 6.28 -> 5.18) against the old
+# no-gas model with a 90-day half-life.
+RECENCY_HALF_LIFE_DAYS = 30
+GAS_FLOOR = 0.5        # p/kWh; guards the price/gas ratio against a bad near-zero gas value
 BAND_TARGET = 0.8      # share of actual prices the 10-90% range should contain
 BAND_MIN_SCORED = 96   # two days of half-hours before a day-ahead gets its own widening factor
 BAND_MAX_SCALE = 6.0
@@ -44,6 +51,7 @@ def make_features(df: pd.DataFrame) -> pd.DataFrame:
     X["is_weekend"] = (local.dayofweek >= 5).astype(int)
     X["is_peak"] = is_peak(df.index)
     X["price_level"] = df["price_level"]
+    X["gas"] = df["gas"] if "gas" in df else np.nan
     return X[FEATURES]
 
 
@@ -60,50 +68,76 @@ def attach_price_level(df: pd.DataFrame, level: pd.Series) -> pd.DataFrame:
     return out
 
 
-def _fit(X: pd.DataFrame, y: pd.Series, w: np.ndarray) -> dict[str, HistGradientBoostingRegressor]:
+def attach_gas(df: pd.DataFrame, gas: pd.Series | None) -> pd.DataFrame:
+    """Gas price known when each day's prices are set: the previous gas day's SAP (the day-ahead auction runs
+    the day before). Days after the latest published value carry it forward."""
+    out = df.copy()
+    if gas is None or gas.empty:
+        out["gas"] = np.nan
+        return out
+    g = pd.Series(gas.values, index=pd.DatetimeIndex(pd.to_datetime(list(gas.index)))).sort_index()
+    days = pd.DatetimeIndex(df.index.tz_convert(config.TZ).tz_localize(None).normalize()) - pd.Timedelta(days=1)
+    out["gas"] = g.reindex(days, method="ffill").values
+    return out
+
+
+def _fit(X: pd.DataFrame, y: pd.Series, w: np.ndarray, feats=FEATURES) -> dict[str, HistGradientBoostingRegressor]:
     models = {}
     for name, q in QUANTILES.items():
         m = HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=400, learning_rate=0.05,
                                           max_leaf_nodes=31, min_samples_leaf=40, l2_regularization=1.0,
-                                          categorical_features=[FEATURES.index("dow")], random_state=0)
+                                          categorical_features=[list(feats).index("dow")], random_state=0)
         m.fit(X, y, sample_weight=w)
         models[name] = m
     return models
 
 
-def _predict(models, X: pd.DataFrame) -> pd.DataFrame:
+def _predict(models, X: pd.DataFrame, scale: np.ndarray | None = None) -> pd.DataFrame:
     out = pd.DataFrame({k: m.predict(X) for k, m in models.items()}, index=X.index)
+    if scale is not None:
+        out = out.mul(scale, axis=0)
     out[["p10", "p50", "p90"]] = np.sort(out[["p10", "p50", "p90"]].values, axis=1)  # no quantile crossing
     return out.clip(upper=config.PRICE_CAP)
 
 
-def train_and_predict(history: pd.DataFrame, national: pd.Series, future: pd.DataFrame):
+def train_and_predict(history: pd.DataFrame, national: pd.Series, future: pd.DataFrame,
+                      gas: pd.Series | None = None):
     """
-    history: actual gen/demand (UTC index), national: actual national price, future: forecast inputs.
+    history: actual gen/demand (UTC index), national: actual national price, future: forecast inputs,
+    gas: daily wholesale gas price (p/kWh) by gas day; without it the model falls back to price alone.
     Returns (predictions DataFrame p10/p50/p90, train_rows, holdout_mae).
     """
     level = daily_price_level(national)
-    train = attach_price_level(history, level).join(national.rename("price"), how="inner").dropna()
+    train = attach_gas(attach_price_level(history, level), gas).join(national.rename("price"), how="inner")
+    use_gas = bool(train["gas"].notna().sum() >= 48 * 30)
+    feats = FEATURES if use_gas else [f for f in FEATURES if f != "gas"]
+    train = train.dropna(subset=[c for c in train if c != "gas" or use_gas])
     if len(train) < 48 * 30:
         raise RuntimeError(f"Only {len(train)} training rows available; need at least 30 days of history")
 
     age_days = (train.index.max() - train.index).total_seconds() / 86400
     weights = 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
-    X, y = make_features(train), train["price"]
+    X = make_features(train)[feats]
+    scale = np.maximum(X["gas"].to_numpy(), GAS_FLOOR) if use_gas else np.ones(len(X))
+    y = train["price"] / scale  # price as a multiple of the gas price (or plain price without gas)
 
     # Honest error estimate: hold out the last 14 days, then refit on everything.
     cutoff = train.index.max() - pd.Timedelta(days=14)
     tr = train.index <= cutoff
-    holdout = _predict(_fit(X[tr], y[tr], weights[tr]), X[~tr])
-    holdout_mae = float(np.mean(np.abs(holdout["p50"] - y[~tr])))
+    holdout = _predict(_fit(X[tr], y[tr], weights[tr], feats), X[~tr], scale[~tr])
+    holdout_mae = float(np.mean(np.abs(holdout["p50"] - train["price"][~tr])))
 
-    models = _fit(X, y, weights)
+    models = _fit(X, y, weights, feats)
 
-    # For the forecast, the price level is simply the mean of the most recent actuals.
+    # For the forecast, the price level is simply the mean of the most recent actuals, and gas is the latest price.
     recent = national[national.index > national.index.max() - pd.Timedelta(days=LEVEL_WINDOW_DAYS)]
-    fut = future.copy()
+    fut = attach_gas(future, gas)
     fut["price_level"] = recent.mean()
-    preds = _predict(models, make_features(fut))
+    Xf = make_features(fut)[feats]
+    if use_gas:
+        Xf["gas"] = Xf["gas"].fillna(train["gas"].iloc[-1])
+    fscale = np.maximum(Xf["gas"].to_numpy(), GAS_FLOOR) if use_gas else None
+    preds = _predict(models, Xf, fscale)
     return preds, len(train), holdout_mae
 
 

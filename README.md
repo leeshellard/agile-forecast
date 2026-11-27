@@ -15,11 +15,12 @@ A self-hosted forecaster for Octopus **Agile** electricity prices, up to 14 days
 | National demand + embedded wind/solar (history and 14-day forecast) | NESO Data Portal |
 | 14-day metered wind forecast | NESO Data Portal |
 | Metered wind outturn (history) | Elexon BMRS (FUELHH) |
+| Daily wholesale gas price (System Average Price) | National Gas Data Portal |
 
 1. **Target:** the national average price is the mean of the 14 regional prices.
-2. **Model:** scikit-learn `HistGradientBoostingRegressor` with quantile loss (10/50/90%), trained on about a year of half-hourly data. Recent data counts for more (90-day half-life).
-   - Features: demand, metered wind, embedded wind and solar, residual demand, renewable share, time of day, day of week, peak flag.
-   - A trailing 14-day price level stands in for gas and carbon costs, which the fundamentals can't see.
+2. **Model:** scikit-learn `HistGradientBoostingRegressor` with quantile loss (10/50/90%), trained on about a year of half-hourly data. Recent data counts for more (30-day half-life).
+   - Features: demand, metered wind, embedded wind and solar, residual demand, renewable share, time of day, day of week, peak flag, the previous day's gas price, and a trailing 14-day price level (for carbon and anything else the fundamentals can't see).
+   - Gas sets the power price most of the time, so the model predicts price **as a multiple of the gas price**. The daily shape learned when gas was cheap then scales up when gas is dear. Gas tripled between November 2025 and November 2026. In a backtest over 35 days in October-November 2026, this cut the mean error from 6.4 to 6.0 p/kWh, and from 6.3 to 5.2 p/kWh for the next day. If no gas prices are available, the model falls back to price alone.
 3. **Regional prices:** Agile is linear in the wholesale price, plus a 16:00–19:00 peak adder. So each region is fitted as `a × national + b × peak + c` over the last 60 days. No tariff constants are hard-coded.
 4. **Range calibration:** the quantile models are over-confident. On their own, only about 20–40% of actual prices land inside their 10–90% range, and almost none 9 or more days ahead. So each run also checks the last 28 days of scored forecasts and works out two corrections for each day ahead:
    - how far the model's range has to be stretched around the central forecast for 80% of actual prices to have landed inside; and

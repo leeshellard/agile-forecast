@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS gen_actual (
     emb_solar REAL,
     wind      REAL
 );
+CREATE TABLE IF NOT EXISTS gas_prices (
+    day TEXT PRIMARY KEY,        -- gas day, YYYY-MM-DD
+    sap REAL NOT NULL            -- System Average Price, p/kWh
+);
 CREATE TABLE IF NOT EXISTS runs (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -126,6 +130,19 @@ def upsert_gen(gen: pd.DataFrame):
                  wind      = COALESCE(excluded.wind, wind)""",
             rows,
         )
+
+
+def upsert_gas(gas: pd.Series):
+    if gas.empty:
+        return
+    with connect() as con:
+        con.executemany("INSERT OR REPLACE INTO gas_prices VALUES (?, ?)",
+                        [(str(d), float(v)) for d, v in gas.items()])
+
+
+def read_gas() -> pd.Series:
+    df = read_df("SELECT day, sap FROM gas_prices ORDER BY day")
+    return pd.Series(df["sap"].values, index=pd.to_datetime(df["day"]).dt.date, name="sap", dtype=float)
 
 
 def read_df(sql: str, params=()) -> pd.DataFrame:
