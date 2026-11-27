@@ -1,9 +1,11 @@
-"""Fetchers for upstream data: Octopus (prices), NESO (demand, embedded + metered wind forecasts), Elexon (wind actuals).
+"""Fetchers for upstream data: Octopus (prices), NESO (demand, embedded + metered wind forecasts), Elexon (wind actuals),
+National Gas (daily wholesale gas price).
 
 Every fetcher returns data indexed by the UTC start time of each half-hour period.
 """
 from __future__ import annotations
 
+import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +19,8 @@ log = logging.getLogger(__name__)
 OCTOPUS = "https://api.octopus.energy/v1"
 NESO = "https://api.neso.energy/api/3/action"
 ELEXON = "https://data.elexon.co.uk/bmrs/api/v1"
+NATIONAL_GAS = "https://data.nationalgas.com/api/find-gas-data-download"
+GAS_SAP_ID = "PUBOB603"  # "SAP, Actual Day": System Average Price, p/kWh, published ~11:40 for the previous gas day
 
 # NESO resource IDs for rolling forecasts (stable across updates).
 NESO_EMBEDDED_FORECAST = "db6c038f-98af-4570-ab60-24d71ebd0ae5"
@@ -197,3 +201,21 @@ def fetch_wind_history(start: pd.Timestamp) -> pd.Series:
     df["ts"] = pd.to_datetime(df["startTime"], utc=True)
     df = df.drop_duplicates("ts", keep="last").set_index("ts").sort_index()
     return df["generation"].astype(float).rename("wind")
+
+
+# --------------------------------------------------------------------------- National Gas
+
+def fetch_gas_prices(start: pd.Timestamp) -> pd.Series:
+    """Daily GB wholesale gas price (System Average Price, p/kWh), indexed by gas day (date)."""
+    r = _session.get(NATIONAL_GAS, timeout=config.HTTP_TIMEOUT, params={
+        "applicableFor": "Y", "dateType": "GASDAY", "latestFlag": "Y", "type": "CSV", "ids": GAS_SAP_ID,
+        "dateFrom": start.strftime("%Y-%m-%d"),
+        "dateTo": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"),
+    })
+    r.raise_for_status()
+    df = pd.read_csv(io.StringIO(r.text))
+    if df.empty or not {"Applicable For", "Value"} <= set(df.columns):
+        return pd.Series(dtype=float, name="sap")
+    days = pd.to_datetime(df["Applicable For"], dayfirst=True).dt.date
+    out = pd.Series(pd.to_numeric(df["Value"], errors="coerce").values, index=days, name="sap").dropna()
+    return out[~out.index.duplicated(keep="last")].sort_index()

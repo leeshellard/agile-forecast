@@ -84,6 +84,14 @@ def update():
     gen = sources.fetch_demand_history(start)
     wind = sources.fetch_wind_history(start)
     db.upsert_gen(gen.join(wind, how="outer"))
+    try:  # gas sharpens the model, but a National Gas outage must not stop the update
+        stored = db.read_gas()
+        gas_start = start - pd.Timedelta(days=3)
+        if stored.empty or pd.Timestamp(stored.index.min()) > (now - pd.Timedelta(days=config.HISTORY_DAYS - 7)).tz_localize(None):
+            gas_start = now - pd.Timedelta(days=config.HISTORY_DAYS)  # first run, or gas added to an existing install
+        db.upsert_gas(sources.fetch_gas_prices(gas_start))
+    except Exception:
+        log.exception("Gas price fetch failed - using the gas prices already stored")
 
     # Load full training history from the DB.
     horizon_start = now - pd.Timedelta(days=config.HISTORY_DAYS)
@@ -107,7 +115,10 @@ def update():
     if to_predict.empty:
         raise RuntimeError("No forecast inputs available beyond the last published price")
 
-    preds, train_rows, holdout_mae = model.train_and_predict(hist, national, to_predict)
+    gas = db.read_gas()
+    if gas.empty:
+        log.warning("No gas prices stored - forecasting from prices alone")
+    preds, train_rows, holdout_mae = model.train_and_predict(hist, national, to_predict, gas)
     coeffs = model.fit_region_coeffs(wide)
     # Calibrate the 10-90% range on how recent forecasts actually fared (applied when the run is served).
     bands = model.band_calibration(db.scored_points(now - pd.Timedelta(days=config.CALIBRATION_DAYS)))
