@@ -137,8 +137,14 @@ def fetch_input_forecasts() -> pd.DataFrame:
     }, index=pd.DatetimeIndex(emb_idx).tz_localize("UTC"))
 
     wind = _neso_all(NESO_METERED_WIND_14D)
-    wind_df = pd.DataFrame({"wind": wind["Wind_Forecast"].values},
-                           index=pd.DatetimeIndex(pd.to_datetime(wind["Datetime"])).tz_localize("UTC"))
+    if {"Datetime", "Wind_Forecast"} <= set(wind.columns) and not wind.empty:
+        wind_df = pd.DataFrame({"wind": wind["Wind_Forecast"].values},
+                               index=pd.DatetimeIndex(pd.to_datetime(wind["Datetime"])).tz_localize("UTC"))
+    else:
+        # Like the demand feed, NESO sometimes republishes this resource and it is empty for a while;
+        # the pipeline then reuses the wind forecast from the previous run.
+        log.warning("NESO 14-day wind forecast is empty (%d rows)", len(wind))
+        wind_df = pd.DataFrame({"wind": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], tz="UTC"))
 
     dem = _neso_all(NESO_DEMAND_2_14D)
     if {"GDATETIME", "NATIONALDEMAND"} <= set(dem.columns) and not dem.empty:
