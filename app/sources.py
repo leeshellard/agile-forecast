@@ -127,24 +127,32 @@ def fetch_demand_history(start: pd.Timestamp) -> pd.DataFrame:
     return out[out.index >= start].astype(float)
 
 
+def _empty(*cols: str) -> pd.DataFrame:
+    return pd.DataFrame({c: pd.Series(dtype=float) for c in cols}, index=pd.DatetimeIndex([], tz="UTC"))
+
+
 def fetch_input_forecasts() -> pd.DataFrame:
     """Latest NESO forecasts of the model inputs for roughly the next 14 days."""
+    # NESO sometimes republishes these resources and they are empty for a while. An empty feed gives empty
+    # columns; the pipeline then reuses the previous run's forecast (or recent history, for demand).
     emb = _neso_all(NESO_EMBEDDED_FORECAST)
-    emb_idx = pd.to_datetime(emb["DATE_GMT"]).dt.normalize() + pd.to_timedelta(emb["TIME_GMT"] + ":00")
-    emb_df = pd.DataFrame({
-        "emb_wind": emb["EMBEDDED_WIND_FORECAST"].values,
-        "emb_solar": emb["EMBEDDED_SOLAR_FORECAST"].values,
-    }, index=pd.DatetimeIndex(emb_idx).tz_localize("UTC"))
+    if {"DATE_GMT", "TIME_GMT", "EMBEDDED_WIND_FORECAST", "EMBEDDED_SOLAR_FORECAST"} <= set(emb.columns) and not emb.empty:
+        emb_idx = pd.to_datetime(emb["DATE_GMT"]).dt.normalize() + pd.to_timedelta(emb["TIME_GMT"] + ":00")
+        emb_df = pd.DataFrame({
+            "emb_wind": emb["EMBEDDED_WIND_FORECAST"].values,
+            "emb_solar": emb["EMBEDDED_SOLAR_FORECAST"].values,
+        }, index=pd.DatetimeIndex(emb_idx).tz_localize("UTC"))
+    else:
+        log.warning("NESO embedded wind/solar forecast is empty (%d rows)", len(emb))
+        emb_df = _empty("emb_wind", "emb_solar")
 
     wind = _neso_all(NESO_METERED_WIND_14D)
     if {"Datetime", "Wind_Forecast"} <= set(wind.columns) and not wind.empty:
         wind_df = pd.DataFrame({"wind": wind["Wind_Forecast"].values},
                                index=pd.DatetimeIndex(pd.to_datetime(wind["Datetime"])).tz_localize("UTC"))
     else:
-        # Like the demand feed, NESO sometimes republishes this resource and it is empty for a while;
-        # the pipeline then reuses the wind forecast from the previous run.
         log.warning("NESO 14-day wind forecast is empty (%d rows)", len(wind))
-        wind_df = pd.DataFrame({"wind": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], tz="UTC"))
+        wind_df = _empty("wind")
 
     dem = _neso_all(NESO_DEMAND_2_14D)
     if {"GDATETIME", "NATIONALDEMAND"} <= set(dem.columns) and not dem.empty:
@@ -152,10 +160,8 @@ def fetch_input_forecasts() -> pd.DataFrame:
         dem_idx = pd.DatetimeIndex(pd.to_datetime(dem["GDATETIME"])).tz_localize("UTC") - pd.Timedelta(minutes=30)
         dem_df = pd.DataFrame({"demand": dem["NATIONALDEMAND"].values}, index=dem_idx)
     else:
-        # NESO occasionally republishes this resource and it is empty for a while; the pipeline then
-        # fills demand from recent history instead of failing the whole update.
         log.warning("NESO 2-14 day demand forecast is empty (%d rows)", len(dem))
-        dem_df = pd.DataFrame({"demand": pd.Series(dtype=float)}, index=pd.DatetimeIndex([], tz="UTC"))
+        dem_df = _empty("demand")
 
     # Short-term: the demand-update feed includes forecast rows for the next few days.
     upd = _neso_all(NESO_DEMAND_UPDATE)

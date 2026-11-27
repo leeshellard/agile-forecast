@@ -49,24 +49,24 @@ def _demand_from_history(future: pd.DataFrame, hist: pd.DataFrame, days: int = 1
     return future
 
 
-def _wind_from_last_run(future: pd.DataFrame) -> pd.DataFrame:
-    """If NESO's wind forecast feed is empty, reuse the wind forecast saved with the latest run.
+def _inputs_from_last_run(future: pd.DataFrame, cols=("wind", "emb_wind", "emb_solar")) -> pd.DataFrame:
+    """If a NESO forecast feed is empty, reuse that input's forecast saved with the latest run.
     Half-hours that run didn't cover are left empty and dropped, so the forecast just gets shorter."""
-    if "wind" not in future:
-        future["wind"] = float("nan")
-    missing = future["wind"].isna()
-    if not missing.any():
+    for c in cols:
+        if c not in future:
+            future[c] = float("nan")
+    gaps = [c for c in cols if future[c].isna().any()]
+    if not gaps:
         return future
-    last = db.read_df("SELECT ts, wind FROM run_points WHERE run_id = (SELECT MAX(id) FROM runs) "
-                      "AND wind IS NOT NULL")
+    last = db.read_df("SELECT ts, " + ", ".join(gaps) + " FROM run_points WHERE run_id = (SELECT MAX(id) FROM runs)")
     if last.empty:
         return future
-    prev = pd.Series(last["wind"].values, index=pd.to_datetime(last["ts"], utc=True)).astype(float)
-    fill = prev.reindex(future.index)
-    filled = int((missing & fill.notna()).sum())
-    if filled:
-        log.warning("No NESO wind forecast for %d half-hours - reusing the previous run's wind forecast", filled)
-    future["wind"] = future["wind"].fillna(fill)
+    last = last.set_index(pd.to_datetime(last.pop("ts"), utc=True)).astype(float).reindex(future.index)
+    for c in gaps:
+        filled = int((future[c].isna() & last[c].notna()).sum())
+        if filled:
+            log.warning("No NESO %s forecast for %d half-hours - reusing the previous run's forecast", c, filled)
+        future[c] = future[c].fillna(last[c])
     return future
 
 
@@ -101,7 +101,7 @@ def update():
     future = sources.fetch_input_forecasts()
     future = _fill_gaps(future)
     future = _demand_from_history(future, hist)
-    future = _wind_from_last_run(future)
+    future = _inputs_from_last_run(future)
     future = future[(future.index >= min(now, fc_start)) & (future.index < fc_end)].dropna()
     to_predict = future[future.index >= fc_start]
     if to_predict.empty:
