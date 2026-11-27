@@ -49,6 +49,27 @@ def _demand_from_history(future: pd.DataFrame, hist: pd.DataFrame, days: int = 1
     return future
 
 
+def _wind_from_last_run(future: pd.DataFrame) -> pd.DataFrame:
+    """If NESO's wind forecast feed is empty, reuse the wind forecast saved with the latest run.
+    Half-hours that run didn't cover are left empty and dropped, so the forecast just gets shorter."""
+    if "wind" not in future:
+        future["wind"] = float("nan")
+    missing = future["wind"].isna()
+    if not missing.any():
+        return future
+    last = db.read_df("SELECT ts, wind FROM run_points WHERE run_id = (SELECT MAX(id) FROM runs) "
+                      "AND wind IS NOT NULL")
+    if last.empty:
+        return future
+    prev = pd.Series(last["wind"].values, index=pd.to_datetime(last["ts"], utc=True)).astype(float)
+    fill = prev.reindex(future.index)
+    filled = int((missing & fill.notna()).sum())
+    if filled:
+        log.warning("No NESO wind forecast for %d half-hours - reusing the previous run's wind forecast", filled)
+    future["wind"] = future["wind"].fillna(fill)
+    return future
+
+
 def update():
     db.init()
     now = pd.Timestamp.now(tz="UTC").floor("30min")
@@ -80,6 +101,7 @@ def update():
     future = sources.fetch_input_forecasts()
     future = _fill_gaps(future)
     future = _demand_from_history(future, hist)
+    future = _wind_from_last_run(future)
     future = future[(future.index >= min(now, fc_start)) & (future.index < fc_end)].dropna()
     to_predict = future[future.index >= fc_start]
     if to_predict.empty:
